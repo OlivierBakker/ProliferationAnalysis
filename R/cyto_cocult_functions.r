@@ -547,6 +547,7 @@ fit.peaks <- function(cur.trace,
 #' # Manual table
 #' peaks <- data.frame(generation=c(0,1,2), peak_events=c(1000, 1000, 1000))
 #' get.prolif.stats(peaks)
+#' @export
 get.prolif.stats <- function(peak.stats) {
 
   founding.pop <- sum(peak.stats$peak_events / 2^peak.stats$generation)
