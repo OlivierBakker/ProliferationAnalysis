@@ -52,6 +52,7 @@ find.local.min <- function(x, y, lower.x, upper.x){
 #' @examples
 #' y <- rnorm(100)
 #' nn.smoother(y, 2)
+#' @export
 nn.smoother <- function(y, window=2) {
   # y <- y[order(y, decreasing = T)]
   y.out <- c()
@@ -65,11 +66,19 @@ nn.smoother <- function(y, window=2) {
     y.out[i] <- mean(y[i.min:i.max])
   }
   return(y.out)
-
 }
 
 #-------------------------------------------------------------------------------
-# Find the index of the value in x that is closest to value
+#' Find nearest index
+#'
+#' Find the index of the value in x that is closest to value
+#'
+#' @param x a vector
+#' @param the value to search the nearest value in x
+#' @returns the index in x closest to value
+#' @examples
+#' x <- rnorm(100)
+#' nearest.index(x, 0)
 nearest.index <- function(x, value) {
   which.min(abs(x-value))
 }
@@ -193,8 +202,13 @@ gaussian.prolif.resid <- function(par, n.peaks, x, y, fixed=NULL) {
 # during optimization. Defaults to 1sd of the estimated peak width.
 # This avoids issues with gating, where a tail might be present stemming
 # from bleedthrough of a CTV- population. To ignore this, set to Inf.
-fit.peaks <- function(cur.trace, bins, smoothing.window, peak.thresh.enrich,
-                      peak.thresh.summit, peak.0.lower.bound, max.peaks=12,
+fit.peaks <- function(cur.trace,
+                      peak.thresh.enrich,
+                      peak.thresh.summit,
+                      peak.0.lower.bound,
+                      bins=100,
+                      smoothing.window=2,
+                      max.peaks=12,
                       plot=T,
                       plot.main = "Proliferation model",
                       opt.peak.pos.dev=NULL) {
@@ -507,9 +521,32 @@ fit.peaks <- function(cur.trace, bins, smoothing.window, peak.thresh.enrich,
 }
 
 #-------------------------------------------------------------------------------
-# Takes output from fit.peaks and calculates proliferation statistics
-# FCS express definitions
-# https://fcsexpressdownloads.s3.amazonaws.com/manual/manual_WIN_RUO/index.html?proliferation_statistics.htm
+#' Get proliferation statistics
+#'
+#' Takes output from fit.peaks and calculates proliferation statistics.
+#' Proliferation statistics according to the FCS express definitions
+#' https://fcsexpressdownloads.s3.amazonaws.com/manual/manual_WIN_RUO/index.html?proliferation_statistics.htm
+#'
+#' Can be used manually by provided a data frame with two columns
+#' - generation
+#' - peak_events
+#' Where each row represent the peak number and number of events in a peak.
+#'
+#' @param peak.stats output from fit.peaks (data frame)
+#' @returns A dataframe with proliferation statistics
+#' @example
+#'
+#' # Simulate proliferation data
+#' y <- 10 ^ rnorm(1000, mean=10, sd=0.05)
+#' y <- c(y/4, y/2, y)
+#'
+#' # Fit peaks
+#' peaks <- fit.peaks(y, 0, 0, peak.0.lower.bound=9.8)
+#' get.prolif.stats(peaks)
+#'
+#' # Manual table
+#' peaks <- data.frame(generation=c(0,1,2), peak_events=c(1000, 1000, 1000))
+#' get.prolif.stats(peaks)
 get.prolif.stats <- function(peak.stats) {
 
   founding.pop <- sum(peak.stats$peak_events / 2^peak.stats$generation)
