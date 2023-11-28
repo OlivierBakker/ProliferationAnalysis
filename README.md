@@ -7,7 +7,7 @@ Depends on
 - minpack.lm https://cran.r-project.org/web/packages/minpack.lm/index.html
 
 ```
-install.packages(minpack.lm)
+install.packages("minpack.lm")
 devtools::install_github("https://github.com/OlivierBakker/ProliferationAnalysis/tree/main")
 ```
 
@@ -15,6 +15,9 @@ devtools::install_github("https://github.com/OlivierBakker/ProliferationAnalysis
 
 The following simulates some proliferation data and fits peaks to it
 ```
+library(ProliferationAnalysis)
+library(minpack.lm)
+
 # Simulate proliferation data
 y <- 10 ^ rnorm(1000, mean=10, sd=0.05)
 y <- c(y/4, y/2, y)
