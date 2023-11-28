@@ -100,7 +100,7 @@ find.next.peak <- function(x, y, prev.peak, peak.dist) {
 }
 
 #-------------------------------------------------------------------------------
-# Find the relative enrichment over a valley
+#'Find the relative enrichment over a valley
 find.enrichment <- function(x, y, curpeak.mean, est.window) {
 
   curpeak.summit  <- y[nearest.index(x, curpeak.mean)]
@@ -115,7 +115,7 @@ find.enrichment <- function(x, y, curpeak.mean, est.window) {
 }
 
 #-------------------------------------------------------------------------------
-# Gaussian of a single peak
+#'Gaussian of a single peak
 gaussian.prolif.single.peak <- function(x, mean, sd, summit) {
   # Gaussian density
   cur.density <- dnorm(x, mean=mean, sd=sd)
@@ -128,8 +128,8 @@ gaussian.prolif.single.peak <- function(x, mean, sd, summit) {
 }
 
 #-------------------------------------------------------------------------------
-# Gaussian prolif model, it is a mixture distribution scaled by relative
-# peak heights.
+#' Gaussian prolif model, it is a mixture distribution scaled by relative
+#' peak heights.
 gaussian.prolif.model <- function(means, sd, summits, x) {
 
   if (length(sd)==1) {
@@ -147,8 +147,8 @@ gaussian.prolif.model <- function(means, sd, summits, x) {
 }
 
 #-------------------------------------------------------------------------------
-# Wrapper that returns a gaussian proliferation model.
-# Takes a vector of paremeters par, number of peaks, and data X
+#' Wrapper that returns a gaussian proliferation model.
+#' Takes a vector of paremeters par, number of peaks, and data X
 gaussian.prolif.model.wrapper <- function(par, n.peaks, x, fixed=NULL) {
 
   mean.names   <- paste0("gen", 0:(n.peaks-1), ".mean")
@@ -166,47 +166,72 @@ gaussian.prolif.model.wrapper <- function(par, n.peaks, x, fixed=NULL) {
 }
 
 #-------------------------------------------------------------------------------
-# Residuals between observed CTV trace and gaussian prolif model
+#' Residuals between observed CTV trace and gaussian prolif model
 gaussian.prolif.resid <- function(par, n.peaks, x, y, fixed=NULL) {
   return(y - gaussian.prolif.model.wrapper(par, n.peaks, x, fixed))
 }
 
 #-------------------------------------------------------------------------------
-# Fit peaks on a CTV or CFSE or other tracking dye trace using a binned approach.
-# The trace should be raw per event data from the FCS file on the CTV+ population.
-
-# As a proliferation model, a guassian mixture distribution is fit.
-# Initial parameters (number of peaks, peak means, peak summits) are estimated
-# using a simple approach where first the generation zero peak is estimated based
-# on 'peak.0.lower.bound' on smoothed data. The bins are smoothed using a
-# nearest neighbour smoother in the window provided.
-
-# Peaks are only called if they exceed peak.threshold, the relative enrichment
-# between the valley's either side of the peak and the peak summit. Peaks
-# must also be adjacent. So if peak 2 does not pass peak.threshold but peak
-# 3 does, only 2 peaks are fit. This is done to avoid fitting many peaks in the
-# marginal count range.
-
-# Using the gen0 peak the subsequent peak position is estimated, after which
-# the summit is found and the peak mean updated to the local summit. This is
-# repeated using each subsequent peak.
-
-# After estimating starting values, a gaussian mixture distribution is fit to
-# the trace (a sum of the PDF of individuals gaussians). The starting values
-# for the peak standard deviations are estimated from the trace in the bound
-# of peak0. These values are input into the Levenberg-Marquardt algo to
-# optimise with respect to the resdiual sum of squares between the model
-# and the smoothed trace.
-
-# opt.peak.pos.dev sets the maximum deviation allowed after the last peak
-# during optimization. Defaults to 1sd of the estimated peak width.
-# This avoids issues with gating, where a tail might be present stemming
-# from bleedthrough of a CTV- population. To ignore this, set to Inf.
-fit.peaks <- function(cur.trace,
-                      peak.thresh.enrich,
-                      peak.thresh.summit,
+#' Fit a proliferation model using least squares
+#'
+#' Fit peaks on a CTV or CFSE or other tracking dye trace using a binned approach.
+#' The trace should be raw per event data from the FCS file on the CTV+ population.
+#'
+#' @details
+#' As a proliferation model, a guassian mixture distribution is fit.
+#' Initial parameters (number of peaks, peak means, peak summits) are estimated
+#' using a simple approach where first the generation zero peak is estimated based
+#' on 'peak.0.lower.bound' on smoothed data. The bins are smoothed using a
+#' nearest neighbour smoother in the window provided.
+#'
+#' Peaks are only called if they exceed peak.thresh.enrich, the relative enrichment
+#' between the valley's either side of the peak and the peak summit. Peaks
+#' must also be adjacent. So if peak 2 does not pass peak.thresh.enrich but peak
+#' 3 does, only 2 peaks are fit. This is done to avoid fitting many peaks in the
+#' marginal count range.
+#'
+#' Using the gen0 peak the subsequent peak position is estimated, after which
+#' the summit is found and the peak mean updated to the local summit. This is
+#' repeated using each subsequent peak.
+#'
+#' After estimating starting values, a gaussian mixture distribution is fit to
+#' the trace (a sum of the PDF of individuals gaussians). The starting values
+#' for the peak standard deviations are estimated from the trace in the bound
+#' of peak0. These values are input into the Levenberg-Marquardt algo to
+#' optimise with respect to the resdiual sum of squares between the model
+#' and the smoothed trace.
+#'
+#' opt.peak.pos.dev sets the maximum deviation allowed after the last peak
+#' during optimization. Defaults to 1sd of the estimated peak width.
+#' This avoids issues with gating, where a tail might be present stemming
+#' from bleedthrough of a CTV- population. To ignore this, set to Inf.
+#'
+#' @param cur.trace raw FACS intensities
+#' @param peak.0.lower.bound the value on log10 scale where the first valley is
+#' @param peak.thresh.enrich fold change over valley to call peak in initial estimation (default 1)
+#' @param peak.thresh.summit minimum height of a peak in percentage of total heights (default 0.05)
+#' @param bins number of bins for fitting (default 250)
+#' @param smoothing.window number of values up and downstream for the NN smoother (default 2)
+#' @param max.peaks the maximum number of peaks to search for (default 12)
+#' @param plot should results be plotted
+#' @param plot.main title for the plot
+#' @param opt.peak.pos.dev sets values after the last estimated peak to zero (default NULL). See @details
+#' @returns A data frame with peak statistics
+#'
+#' @examples
+#'
+#' # Simulate proliferation data
+#' y <- 10 ^ rnorm(1000, mean=10, sd=0.05)
+#' y <- c(y/4, y/2, y)
+#'
+#' # Fit peaks
+#' peaks <- fit.peaks.ls(y, 0, 0, peak.0.lower.bound=9.8)
+#' @export
+fit.peaks.ls <- function(cur.trace,
                       peak.0.lower.bound,
-                      bins=100,
+                      peak.thresh.enrich=1,
+                      peak.thresh.summit=0.05,
+                      bins=250,
                       smoothing.window=2,
                       max.peaks=12,
                       plot=T,
@@ -528,20 +553,23 @@ fit.peaks <- function(cur.trace,
 #' https://fcsexpressdownloads.s3.amazonaws.com/manual/manual_WIN_RUO/index.html?proliferation_statistics.htm
 #'
 #' Can be used manually by provided a data frame with two columns
+#'
 #' - generation
+#'
 #' - peak_events
+#'
 #' Where each row represent the peak number and number of events in a peak.
 #'
 #' @param peak.stats output from fit.peaks (data frame)
 #' @returns A dataframe with proliferation statistics
-#' @example
+#' @examples
 #'
 #' # Simulate proliferation data
 #' y <- 10 ^ rnorm(1000, mean=10, sd=0.05)
 #' y <- c(y/4, y/2, y)
 #'
 #' # Fit peaks
-#' peaks <- fit.peaks(y, 0, 0, peak.0.lower.bound=9.8)
+#' peaks <- fit.peaks.ls(y, 0, 0, peak.0.lower.bound=9.8)
 #' get.prolif.stats(peaks)
 #'
 #' # Manual table
