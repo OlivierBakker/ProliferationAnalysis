@@ -23,6 +23,6 @@ y <- 10 ^ rnorm(1000, mean=10, sd=0.05)
 y <- c(y/4, y/2, y)
 
 # Fit peaks
-peaks <- fit.peaks(y, 0, 0, peak.0.lower.bound=9.8)
+peaks <- fit.peaks.ls(y, 0, 0, peak.0.lower.bound=9.8)
 get.prolif.stats(peaks)
 ```
