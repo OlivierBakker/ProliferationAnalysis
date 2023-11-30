@@ -22,7 +22,17 @@ library(minpack.lm)
 y <- 10 ^ rnorm(1000, mean=10, sd=0.05)
 y <- c(y/4, y/2, y)
 
-# Fit peaks
-peaks <- fit.peaks.ls(y, 0, 0, peak.0.lower.bound=9.8)
+# Fit peaks using least squares
+peaks <- fit.peaks(y, peak.0.lower.bound=9.8)
+get.prolif.stats(peaks)
+
+
+# Simulate proliferation data #2
+y <- 10 ^ rnorm(1000, mean=10, sd=0.05)
+y <- c((y/8)[1:500], y/4, y/2, y[1:500])
+
+# Fit peaks using MLE
+peaks <- fit.peaks(y, peak.0.lower.bound=9.8, mode="MLE")
+
 get.prolif.stats(peaks)
 ```
