@@ -8,6 +8,7 @@
 #' @param lower.x lower limit of x to search.
 #' @param upper.x upper limit of x to search.
 #' @returns the value of x where y is maximised.
+#'
 #' @examples
 #' x <- rnorm(100)
 #' y <- rnorm(100)
@@ -29,6 +30,7 @@ find.local.max <- function(x, y, lower.x, upper.x){
 #' @param lower.x lower limit of x to search.
 #' @param upper.x upper limit of x to search.
 #' @returns the value of x where y is minimized
+#'
 #' @examples
 #' x <- rnorm(100)
 #' y <- rnorm(100)
@@ -49,6 +51,7 @@ find.local.min <- function(x, y, lower.x, upper.x){
 #' @param window how many values up and down are averaged
 #' @returns the mean of each y
 #' value and the surrounding values specified by window
+#'
 #' @examples
 #' y <- rnorm(100)
 #' nn.smoother(y, 2)
@@ -76,6 +79,7 @@ nn.smoother <- function(y, window=2) {
 #' @param x a vector
 #' @param the value to search the nearest value in x
 #' @returns the index in x closest to value
+#'
 #' @examples
 #' x <- rnorm(100)
 #' nearest.index(x, 0)
@@ -84,8 +88,8 @@ nearest.index <- function(x, value) {
 }
 
 #-------------------------------------------------------------------------------
-# Find the mode of the next peak using the previous peak and the average peak
-# distance
+#' Find the mode of the next peak using the previous peak and the average peak
+#' distance
 find.next.peak <- function(x, y, prev.peak, peak.dist) {
 
   est.window      <- peak.dist/2
@@ -100,7 +104,7 @@ find.next.peak <- function(x, y, prev.peak, peak.dist) {
 }
 
 #-------------------------------------------------------------------------------
-#'Find the relative enrichment over a valley
+#' Find the relative enrichment over a valley
 find.enrichment <- function(x, y, curpeak.mean, est.window) {
 
   curpeak.summit  <- y[nearest.index(x, curpeak.mean)]
@@ -115,8 +119,14 @@ find.enrichment <- function(x, y, curpeak.mean, est.window) {
 }
 
 #-------------------------------------------------------------------------------
-#'Gaussian of a single peak
-gaussian.prolif.single.peak <- function(x, mean, sd, summit) {
+#' Scaled distribution of a single peak in prolif model
+#'
+#' @param x x values (log scaled intensity values)
+#' @param mean the mean of the peak
+#' @param sd the sd of the peak
+#' @param the peak height (estimated relative to the other peaks)
+#' @returns scaled density for peak height
+prolif.single.peak <- function(x, mean, sd, summit) {
   # Gaussian density
   cur.density <- dnorm(x, mean=mean, sd=sd)
 
@@ -128,18 +138,16 @@ gaussian.prolif.single.peak <- function(x, mean, sd, summit) {
 }
 
 #-------------------------------------------------------------------------------
+#' Mixture distribution of Gaussian
+#'
 #' Gaussian prolif model, it is a mixture distribution scaled by relative
 #' peak heights.
-gaussian.prolif.model <- function(means, sd, summits, x) {
-
-  if (length(sd)==1) {
-    sd <- rep(sd, length(means))
-  }
+prolif.model <- function(means, sd, summits, x) {
 
   y.pred <- 0
 
   for (i in 1:length(means)) {
-    cur.pred <- gaussian.prolif.single.peak(x, means[i], sd[i], summits[i])
+    cur.pred <- prolif.single.peak(x, means[i], sd[i], summits[i])
     y.pred   <- y.pred + cur.pred
   }
 
@@ -147,9 +155,60 @@ gaussian.prolif.model <- function(means, sd, summits, x) {
 }
 
 #-------------------------------------------------------------------------------
+#' Density of mixture distribution of Gaussian
+#'
+prolif.model.density <- function(means, sd, summits, x, verbose=F) {
+  density <- 0
+
+  summits <- summits/sum(summits)
+
+  if (verbose) {
+    cat("[INFO] means: ",   means, "\n")
+    cat("[INFO] sd: ",      sd, "\n")
+    cat("[INFO] summits: ", summits, "\n")
+    cat("[INFO] --------------------------------------------- \n")
+
+  }
+
+  density <- 0
+  for (i in 1:length(means)) {
+    cur.d   <- dnorm(x, mean=means[i], sd=sd[i])
+    density  <- density + (summits[i] * cur.d)
+  }
+
+  # Hack to deal with numeric precision limit on very small densities
+  if (sum(density==0) >0) {
+    msg <- "Zero densities detected. This is due to a numeric precision limit in dnorm().\nAs a hack setting zeroes to  4.761311e-320. This does invalidate the PDF"
+    warning(simpleWarning(msg))
+    density[density==0] <- 4.761311e-320
+  }
+
+  return(density)
+}
+
+#-------------------------------------------------------------------------------
+#' Negative log likelihood of mixture distribution of Gaussian
+#'
+prolif.model.nll <- function(means, sd, summits, x, verbose=F) {
+  density <- prolif.model.density(means, sd, summits, x, verbose=verbose)
+
+  nll <- -sum(log(density))
+
+  if (verbose) {
+    cat("[INFO] nll: ", nll, "\n")
+  }
+  return(nll)
+}
+
+#-------------------------------------------------------------------------------
 #' Wrapper that returns a gaussian proliferation model.
 #' Takes a vector of paremeters par, number of peaks, and data X
-gaussian.prolif.model.wrapper <- function(par, n.peaks, x, fixed=NULL) {
+prolif.model.wrapper <- function(par, n.peaks, x, fixed=NULL, type="prolif_model", verbose=F, opt.env=NULL) {
+
+  names      <- names(par)
+  par        <- as.numeric(par)
+  names(par) <- names
+
 
   mean.names   <- paste0("gen", 0:(n.peaks-1), ".mean")
   summit.names <- paste0("gen", 0:(n.peaks-1), ".summit")
@@ -160,93 +219,58 @@ gaussian.prolif.model.wrapper <- function(par, n.peaks, x, fixed=NULL) {
 
   mean.vec   <- as.numeric(par[mean.names])
   summit.vec <- as.numeric(par[summit.names])
-  sd         <- par$peak.sd
+  sd.vec     <- as.numeric(par["peak.sd"])
 
-  return(gaussian.prolif.model(mean.vec, sd, summit.vec, x))
+  if (length(sd.vec)==1) {
+    sd.vec <- rep(sd.vec, length(mean.vec))
+  }
+
+  # Log the values to the optimization environment
+  if (!is.null(opt.env)) {
+    opt.env[["means"]]   <- rbind(opt.env[["means"]], mean.vec)
+    opt.env[["sd"]]      <- rbind(opt.env[["sd"]], sd.vec)
+    opt.env[["summits"]] <- rbind(opt.env[["summits"]], summit.vec)
+  }
+
+  if (type == "prolif_model") {
+    return(prolif.model(mean.vec, sd.vec, summit.vec, x))
+
+  } else if (type == "density") {
+    return(prolif.model.density(mean.vec, sd.vec, summit.vec, x, verbose=verbose))
+
+  } else if (type == "neg_log_likelihood") {
+    score <- prolif.model.nll(mean.vec, sd.vec, summit.vec, x, verbose=verbose)
+    if (!is.null(opt.env)) {
+      opt.env[["score"]]   <- c(opt.env[["score"]], score)
+    }
+    return(score)
+  } else {
+
+    e <- simpleError("Invalid type argument.")
+    stop(e)
+  }
 }
 
 #-------------------------------------------------------------------------------
-#' Residuals between observed CTV trace and gaussian prolif model
-gaussian.prolif.resid <- function(par, n.peaks, x, y, fixed=NULL) {
-  return(y - gaussian.prolif.model.wrapper(par, n.peaks, x, fixed))
+#' Residuals between observed CTV trace and Gaussian prolif model
+prolif.resid <- function(par, n.peaks, x, y, fixed=NULL, opt.env=NULL) {
+  residuals <- y - prolif.model.wrapper(par, n.peaks, x, fixed, type="prolif_model", opt.env=opt.env)
+  return(residuals)
 }
 
 #-------------------------------------------------------------------------------
-#' Fit a proliferation model using least squares
+#' Estimate initial parameters for proliferation model
 #'
-#' Fit peaks on a CTV or CFSE or other tracking dye trace using a binned approach.
-#' The trace should be raw per event data from the FCS file on the CTV+ population.
-#'
-#' @details
-#' As a proliferation model, a guassian mixture distribution is fit.
-#' Initial parameters (number of peaks, peak means, peak summits) are estimated
-#' using a simple approach where first the generation zero peak is estimated based
-#' on 'peak.0.lower.bound' on smoothed data. The bins are smoothed using a
-#' nearest neighbour smoother in the window provided.
-#'
-#' Peaks are only called if they exceed peak.thresh.enrich, the relative enrichment
-#' between the valley's either side of the peak and the peak summit. Peaks
-#' must also be adjacent. So if peak 2 does not pass peak.thresh.enrich but peak
-#' 3 does, only 2 peaks are fit. This is done to avoid fitting many peaks in the
-#' marginal count range.
-#'
-#' Using the gen0 peak the subsequent peak position is estimated, after which
-#' the summit is found and the peak mean updated to the local summit. This is
-#' repeated using each subsequent peak.
-#'
-#' After estimating starting values, a gaussian mixture distribution is fit to
-#' the trace (a sum of the PDF of individuals gaussians). The starting values
-#' for the peak standard deviations are estimated from the trace in the bound
-#' of peak0. These values are input into the Levenberg-Marquardt algo to
-#' optimise with respect to the resdiual sum of squares between the model
-#' and the smoothed trace.
-#'
-#' opt.peak.pos.dev sets the maximum deviation allowed after the last peak
-#' during optimization. Defaults to 1sd of the estimated peak width.
-#' This avoids issues with gating, where a tail might be present stemming
-#' from bleedthrough of a CTV- population. To ignore this, set to Inf.
-#'
-#' @param cur.trace raw FACS intensities
-#' @param peak.0.lower.bound the value on log10 scale where the first valley is
+#' @param cur.hist histogram object
+#' @param y a smoothed or raw count trace
 #' @param peak.thresh.enrich fold change over valley to call peak in initial estimation (default 1)
 #' @param peak.thresh.summit minimum height of a peak in percentage of total heights (default 0.05)
-#' @param bins number of bins for fitting (default 250)
-#' @param smoothing.window number of values up and downstream for the NN smoother (default 2)
-#' @param max.peaks the maximum number of peaks to search for (default 12)
-#' @param plot should results be plotted
-#' @param plot.main title for the plot
-#' @param opt.peak.pos.dev sets values after the last estimated peak to zero (default NULL). See @details
-#' @returns A data frame with peak statistics
+#' @param peak.max the maximum number of peaks to search for (default 12)
+#' @param plot should plot be generated
 #'
-#' @examples
-#'
-#' # Simulate proliferation data
-#' y <- 10 ^ rnorm(1000, mean=10, sd=0.05)
-#' y <- c(y/4, y/2, y)
-#'
-#' # Fit peaks
-#' peaks <- fit.peaks.ls(y, 0, 0, peak.0.lower.bound=9.8)
-#' @export
-fit.peaks.ls <- function(cur.trace,
-                      peak.0.lower.bound,
-                      peak.thresh.enrich=1,
-                      peak.thresh.summit=0.05,
-                      bins=250,
-                      smoothing.window=2,
-                      max.peaks=12,
-                      plot=T,
-                      plot.main = "Proliferation model",
-                      opt.peak.pos.dev=NULL) {
+#' @returns data frame with initial peak estimates
 
-  # Construct histogram
-  cur.hist <- hist(log10(cur.trace), breaks=bins, plot=F)
-
-  # Kolmogorov–Zurbenko filter to smooth the counts
-  #y <- kz(cur.hist$counts, m=smoothing.window)
-
-  # Nearest neighbour smoother
-  y <- nn.smoother(cur.hist$counts, window=smoothing.window)
-
+find.initial.peaks <- function(cur.hist, y, peak.0.lower.bound,peak.thresh.enrich=1, peak.thresh.summit=0.05, peak.max=12, plot=F) {
   peak0.mean       <- find.local.max(cur.hist$mids, y, peak.0.lower.bound, max(cur.hist$mids))
 
   if (is.na(peak0.mean)) {
@@ -266,7 +290,7 @@ fit.peaks.ls <- function(cur.trace,
   peak.stats     <- data.frame()
   lim <- min(cur.hist$mids)
 
-  for (i in 1:max.peaks) {
+  for (i in 1:peak.max) {
 
     if (prev.peak.mean-est.peak.dist < lim) {
       next;
@@ -287,7 +311,6 @@ fit.peaks.ls <- function(cur.trace,
   peak.stats$generation <- 0:(nrow(peak.stats)-1)
 
   peak.stats$est_summit_percentage <- peak.stats$est_summit/sum(peak.stats$est_summit)
-
 
   # Filter peaks based on summit height, while taking the next peak into account.
   # It can happen the earlier generations are low in height due to high proliferation.
@@ -332,7 +355,7 @@ fit.peaks.ls <- function(cur.trace,
     }
   }
 
-  # Always force starting generation
+  # Always force starting generation to be present
   if (n.peaks==0) {
     n.peaks <- 1
   }
@@ -342,8 +365,6 @@ fit.peaks.ls <- function(cur.trace,
   #####
   # Plot
   if (plot) {
-    par(mfrow=c(2,2), mar=c(5,5,5,1))
-
     plot(cur.hist$mids,
          cur.hist$counts,
          main="Initial peak estimates",
@@ -360,9 +381,6 @@ fit.peaks.ls <- function(cur.trace,
       abline(v=peak.stats[i, 1], lwd=2, col="grey")
     }
 
-    mtext(plot.main, side = 3, line = -2, outer = TRUE)
-
-
     legend("topleft",
            legend=c("Smoothed data", "Gen0"),
            fill=c("blue", "red"),
@@ -371,78 +389,195 @@ fit.peaks.ls <- function(cur.trace,
   }
   #####
 
-  # If just generation zero is left, do not proceed to optimization
-  if (n.peaks==1) {
-    dummy <- data.frame('opt_mean'=NA, 'opt_summit'=NA, 'opt_peak_sd'=NA, 'peak_area'=NA, 'peak_area_error'=NA, 'peak_area_prop'=NA, 'peak_events'=NA, 'peak_ancestors'=NA)
-    return(cbind(peak.stats, dummy))
+  return(peak.stats)
+}
+
+#-------------------------------------------------------------------------------
+#' Plot optimization of parameters
+#'
+#'
+opt.plot.params <- function(x, opt.env) {
+
+  n     <- ncol(opt.env[["means"]])
+  cols  <- palette.colors(n = n, recycle = T)
+
+  #--------------------------------------------------------------------------
+  # Score
+  plot(1:length(opt.env[["score"]]),
+       opt.env[["score"]],
+       xlab="Iteration",
+       ylab="NLL / RSS",
+       pch=20,
+       col="grey",
+       bty="n",
+       main="Neg. Log Lik. / Res. Sum of Sqr.",
+       type="l")
+
+  #--------------------------------------------------------------------------
+  n.iter <- nrow(opt.env[["means"]])
+  # Mean
+  plot(1:n.iter,
+       opt.env[["means"]][,1],
+       xlab="Iteration",
+       ylab="Mean",
+       pch=20,
+       col=cols[1],
+       bty="n",
+       main="Optim - mean",
+       type="l",
+       ylim=c(min(x), max(x)))
+
+  for (i in 2:ncol(opt.env[["means"]])) {
+    lines(1:n.iter,
+          opt.env[["means"]][,i],
+          col=cols[i])
   }
 
-  #-------------------------------------------------------------------------------
+  legend("right",
+         legend=paste0("Gen", 0:(n-1)),
+         fill=cols,
+         bty="n")
+  #--------------------------------------------------------------------------
+  # SD
+  plot(1:n.iter,
+       opt.env[["sd"]][,1],
+       xlab="Iteration",
+       ylab="Peak SD",
+       pch=20,
+       col=cols[i],
+       bty="n",
+       main="Optim - SD",
+       type="l")
 
-  # Starting parameters
-  x             <- cur.hist$mids
-  y             <- y
-  est.gen0.mean <- peak.stats[1, "est_mean"] # Starting generation mean
-  est.peak.dist <- est.gen0.mean - peak.stats[2, "est_mean"] # Distance between peaks
-
-  #-------------------------------------------------------------------------------
-  # Filter data that cannot be captured by a peak
-  # Usually this does not give issues, but if there is a strong CTV- bleed
-  # the optimization can reach a wrong optimum by increasing the peak sd too
-  # much, so we only want to optimise arround the peaks
-
-  lower.lim <- peak.stats[nrow(peak.stats),"est_mean"] -  (est.peak.dist/2)
-  #y <- y[x > lower.lim]
-  #x <- x[x > lower.lim]
-  y[x < lower.lim] <- 0
-  #-------------------------------------------------------------------------------
-  # Estimate the SD of peak zero
-  h.dist <- est.peak.dist / 2
-  yy <- y[(x > est.gen0.mean-h.dist) & (x < est.gen0.mean + h.dist)]
-  xx <- x[(x > peak0.mean-h.dist) & (x < peak0.mean+h.dist)]
-  est.peak.sd <-  sd(xx)
-
-  # Starting parameter list
-  starts          <- c(as.list(peak.stats$est_mean), as.list(peak.stats$est_summit))
-  mean.names      <- paste0("gen", 0:(n.peaks-1), ".mean")
-  summit.names    <- paste0("gen", 0:(n.peaks-1), ".summit")
-  names(starts)   <- c(mean.names, summit.names)
-  starts$peak.sd  <- est.peak.sd
-
-  # Fix the position of peak 0
-  #fixed <- starts[c("gen0.mean")]
-  #fixed <- starts[grep("mean", names(starts))]
-  fixed  <- NULL
-  starts <- starts[!names(starts) %in% names(fixed)]
-
-  # Deterimine the limits of optimisation of peak positions
-  upper        <- rep(Inf, length(starts))
-  names(upper) <- names(starts)
-  lower        <- rep(-Inf, length(starts))
-  names(lower) <- names(starts)
-
-  # Allow initial peak positions to vary by opt.peak.pos.dev
-  # Defaults to the estimated sd of the peak
-  # Prevents peaks shifting too much
-  if (is.null(opt.peak.pos.dev)) {
-    opt.peak.pos.dev <- starts$peak.sd
+  for (i in 2:ncol(opt.env[["sd"]])) {
+    lines(1:n.iter,
+          opt.env[["sd"]][,i],
+          col=cols[i])
   }
 
-  par.means <- grep("mean", names(starts))
-  upper[par.means] <- as.numeric(starts[par.means]) + opt.peak.pos.dev
-  lower[par.means] <- as.numeric(starts[par.means]) - opt.peak.pos.dev
+  legend("right",
+         legend=paste0("Gen", 0:(n-1)),
+         fill=cols,
+         bty="n")
+  #--------------------------------------------------------------------------
+  # Summit
+  plot(1:n.iter,
+       opt.env[["summits"]][,1],
+       xlab="Iteration",
+       ylab="Summit",
+       pch=20,
+       col=cols[1],
+       bty="n",
+       main="Optim - summit",
+       type="l",
+       ylim=c(min(opt.env[["summits"]]), max(opt.env[["summits"]])))
+
+  for (i in 2:ncol(opt.env[["summits"]])) {
+    lines(1:n.iter,
+          opt.env[["summits"]][,i],
+          col=cols[i])
+  }
+
+  legend("right",
+         legend=paste0("Gen", 0:(n-1)),
+         fill=cols,
+         bty="n")
+}
+
+#-------------------------------------------------------------------------------
+#' Create a new env for storing optimization trace
+#'
+#'
+opt.new.env <- function(n.peaks) {
+  opt.env              <- new.env()
+  opt.env[["score"]]   <- c()
+  opt.env[["means"]]   <- matrix(ncol=n.peaks, nrow=0)
+  opt.env[["sd"]]      <- matrix(ncol=n.peaks, nrow=0)
+  opt.env[["summits"]] <- matrix(ncol=n.peaks, nrow=0)
+
+  return(opt.env)
+}
+
+#-------------------------------------------------------------------------------
+#' Optimize a proliferation model using maximum likelihood
+#'
+#'
+opt.prolif.model.mle <- function(x, starts, upper, lower, fixed, peak.stats, plot=F, opt.env=NULL, verbose=F) {
+
+  # Find optimal parameters using L-BFGS-B
+  res <- optim(
+    par = starts,
+    fn = prolif.model.wrapper,
+    x = x,
+    fixed=fixed,
+    n.peaks = nrow(peak.stats),
+    upper=upper,
+    lower=lower,
+    opt.env=opt.env,
+    type="neg_log_likelihood",
+    method="L-BFGS-B",
+    verbose=verbose
+  )
+
+  final.par <- c(res$par, fixed)
+
+  # Plot
+  if (plot) {
+
+    # Plot parameters over optimization
+    if (!is.null(opt.env)) {
+      opt.plot.params(x, opt.env)
+    }
+
+    ###########
+    # Model fit
+    hd <- hist(x, breaks=250, plot=F)
+    plot(hd$mids,
+         hd$density,
+         xlab="Log10(intensity)",
+         ylab="Density",
+         pch=20,
+         col="grey", bty="n",
+         main="Estimated fit vs optimal fit")
+
+    mod.d <- prolif.model.wrapper(starts, nrow(peak.stats), x = hd$mids, type="density")
+    lines(hd$mids,
+          mod.d,
+          col="blue")
+
+    mod.d <- prolif.model.wrapper(final.par, nrow(peak.stats), x = hd$mids, type="density")
+    lines(hd$mids,
+          mod.d,
+          col="red")
+
+    legend("topleft",
+           legend=c("Initial fit", "Optimized fit", "Data"),
+           fill=c("blue", "red", "grey"),
+           bty="n")
+  }
+
+
+  return(final.par)
+}
+
+#-------------------------------------------------------------------------------
+#' Optimize a proliferation model using least squares
+#'
+#'
+opt.prolif.model.ls <- function(x, y, starts, upper, lower, fixed, peak.stats, plot=F, opt.env=NULL) {
 
   # Find optimal model parameters using Levenberg–Marquardt algo
   # This algo tries to find the minimal least squares solution
   res <- nls.lm(
     par = starts,
-    fn = gaussian.prolif.resid,
+    fn = prolif.resid,
     y = y,
     x = x,
     fixed=fixed,
-    n.peaks = n.peaks,
+    n.peaks = nrow(peak.stats),
     upper=upper,
     lower=lower,
+    opt.env=opt.env,
     control = nls.lm.control(
       nprint = F,
       maxiter = 1024,
@@ -455,16 +590,18 @@ fit.peaks.ls <- function(cur.trace,
 
   final.par <- c(res$par, fixed)
 
+  if (!is.null(opt.env)) {
+    opt.env[["score"]]     <- log2(res$rsstrace)
+  }
+
   #####
   # See how residual sum of squares changes
   if (plot) {
-    plot(log2(res$rsstrace),
-         xlab="Iteration",
-         ylab="log2 - Residual sum of squares",
-         main="Optimization result",
-         bty="n",
-         pch=20)
-    lines(log2(res$rsstrace))
+
+    # Plot parameters over optimization
+    if (!is.null(opt.env)) {
+      opt.plot.params(x, opt.env)
+    }
 
     # Plot estimated parameters to optimal fit
     plot(x, y,
@@ -474,63 +611,286 @@ fit.peaks.ls <- function(cur.trace,
          pch=20,
          col="grey", bty="n")
 
-    y.pred <- sapply(x, function(x){gaussian.prolif.model(means=peak.stats$est_mean,
-                                                          sd=est.peak.sd,
-                                                          summits=peak.stats$est_summit, x)})
+    y.pred <- sapply(x, function(x){prolif.model(means=peak.stats$est_mean,
+                                                 sd=peak.stats$est_peak_sd,
+                                                 summits=peak.stats$est_summit,
+                                                 x)})
 
     lines(y.pred ~ x, lwd=2, col="blue")
 
-    y.pred.optim <- sapply(x, function(x){gaussian.prolif.model(means=as.numeric(final.par[mean.names]),
-                                                                sd=final.par$peak.sd,
-                                                                summits=as.numeric(final.par[summit.names]), x)})
+    y.pred.optim <- sapply(x, function(x){prolif.model.wrapper(final.par, nrow(peak.stats), x=x, fixed=fixed)})
 
     lines(y.pred.optim ~ x, lwd=2, col="red")
     legend("topleft",
            legend=c("Initial fit", "Optimized fit", "Smoothed data"),
            fill=c("blue", "red", "grey"),
            bty="n")
+  }
+  #####
 
+  return(final.par)
+}
+
+
+#-------------------------------------------------------------------------------
+#' Fit a proliferation model using least squares
+#'
+#' Fit peaks on a CTV or CFSE or other tracking dye trace using a binned approach.
+#' The trace should be raw per event data from the FCS file on the CTV+ population.
+#'
+#' @details
+#' As a proliferation model, a guassian mixture distribution is fit.
+#' Initial parameters (number of peaks, peak means, peak summits) are estimated
+#' using a simple approach where first the generation zero peak is estimated based
+#' on 'peak.0.lower.bound' on smoothed data. The bins are smoothed using a
+#' nearest neighbour smoother in the window provided.
+#'
+#' Peaks are only called if they exceed peak.thresh.enrich, the relative enrichment
+#' between the valley's either side of the peak and the peak summit. Peaks
+#' must also be adjacent. So if peak 2 does not pass peak.thresh.enrich but peak
+#' 3 does, only 2 peaks are fit. This is done to avoid fitting many peaks in the
+#' marginal count range.
+#'
+#' Using the gen0 peak the subsequent peak position is estimated, after which
+#' the summit is found and the peak mean updated to the local summit. This is
+#' repeated using each subsequent peak.
+#'
+#' After estimating starting values, a gaussian mixture distribution is fit to
+#' the trace (a sum of the PDF of individuals gaussians). The starting values
+#' for the peak standard deviations are estimated from the trace in the bound
+#' of peak0. These values are input into the Levenberg-Marquardt algo to
+#' optimise with respect to the resdiual sum of squares between the model
+#' and the smoothed trace.
+#'
+#' opt.peak.pos.dev controls the range peaks are allowed to vary in position
+#' during optimization. Defaults to +- half the estimated peak distance (NULL).
+#' To ignore this, set to Inf. This setting avoids the optimizer putting peaks
+#' in the left tail that sometimes might be present.
+#'
+#' @param x raw FACS intensities
+#' @param peak.0.lower.bound the value on log10 scale where the first valley is
+#' @param peak.thresh.enrich fold change over valley to call peak in initial estimation (default 1)
+#' @param peak.thresh.summit minimum height of a peak in percentage of total heights (default 0.05)
+#' @param peak.max the maximum number of peaks to search for (default 12)
+#' @param bins number of bins for fitting (default 250)
+#' @param smoothing.window number of values up and downstream for the NN smoother (default 2)
+#' @param plot should results be plotted
+#' @param plot.main title for the plot
+#' @param opt.peak.pos.dev limits the range where peak positions can be. See @details
+#' @param opt.trim.left.tail Should values that fall outside the model range bet set to zero @details
+
+#' @returns A data frame with peak statistics
+#'
+#' @examples
+#'
+#' # Simulate proliferation data
+#' y <- 10 ^ rnorm(1000, mean=10, sd=0.05)
+#' y <- c(y/4, y/2, y)
+#'
+#' # Fit peaks
+#' peaks <- fit.peaks(y, peak.0.lower.bound=9.8)
+#'
+#' # Simulate proliferation data #2
+#' y <- 10 ^ rnorm(1000, mean=10, sd=0.05)
+#' y <- c((y/8)[1:500], y/4, y/2, y[1:500])
+#'
+#' peaks <- fit.peaks(y, peak.0.lower.bound=9.9, mode="MLE")
+#' @export
+fit.peaks  <- function(trace,
+                      peak.0.lower.bound,
+                      bins=250,
+                      smoothing.window=2,
+                      plot=T,
+                      plot.main = "Proliferation model",
+                      opt.peak.pos.dev=NULL,
+                      opt.trim.left.tail=T,
+                      mode="LS",
+                      ...) {
+
+  # Plotting
+  if (plot) {par(mfrow=c(2,3), mar=c(5,5,5,1))}
+
+  # Construct histogram
+  cur.hist <- hist(log10(trace), breaks=bins, plot=F)
+
+  # Nearest neighbor smoother
+  y.smth     <- nn.smoother(cur.hist$counts, window=smoothing.window)
+
+  peak.stats <- find.initial.peaks(cur.hist, y.smth, peak.0.lower.bound, plot = plot, ...)
+
+  # If just generation zero is left, do not proceed to optimization
+  if (nrow(peak.stats)==1) {
+    dummy <- data.frame('opt_mean'=NA, 'opt_summit'=NA, 'opt_peak_sd'=NA, 'peak_area'=NA, 'peak_area_error'=NA, 'peak_area_prop'=NA, 'peak_events'=NA, 'peak_ancestors'=NA)
+    return(cbind(peak.stats, dummy))
+  }
+
+  #-----------------------------------------------------------------------------
+  # Estimate starting parameters
+  #-----------------------------------------------------------------------------
+  x.mids        <- cur.hist$mids
+  y.smth        <- y.smth
+  est.gen0.mean <- peak.stats[1, "est_mean"] # Starting generation mean
+  est.peak.dist <- est.gen0.mean - peak.stats[2, "est_mean"] # Distance between peaks
+
+  #-----------------------------------------------------------------------------
+  # Filter data that cannot be captured by a peak
+  # Usually this does not give issues, but if there is a strong CTV- bleed
+  # the optimization can reach a wrong optimum by increasing the peak sd too
+  # much, so we only want to optimize around the peaks
+  if (opt.trim.left.tail) {
+    lower.lim <- peak.stats[nrow(peak.stats),"est_mean"] -  (est.peak.dist/2)
+    y.smth[x.mids < lower.lim] <- 0
+  }
+
+  #-----------------------------------------------------------------------------
+  # Roughly estimate the SD of generation zero
+  peak0.mean  <- peak.stats[1,"est_mean"]
+  h.dist      <- est.peak.dist / 2
+  yy          <- y.smth[(x.mids > est.gen0.mean-h.dist) & (x.mids < est.gen0.mean + h.dist)]
+  xx          <- x.mids[(x.mids > peak0.mean-h.dist) & (x.mids < peak0.mean+h.dist)]
+  est.peak.sd <- sd(xx)
+  peak.stats[,"est_peak_sd"] <- est.peak.sd
+
+  #-----------------------------------------------------------------------------
+  # Starting parameter list
+  starts          <- c(as.list(peak.stats$est_mean), as.list(peak.stats$est_summit))
+  mean.names      <- paste0("gen", 0:(nrow(peak.stats)-1), ".mean")
+  summit.names    <- paste0("gen", 0:(nrow(peak.stats)-1), ".summit")
+  sd.names        <- c("peak.sd")
+  names(starts)   <- c(mean.names, summit.names)
+  starts$peak.sd  <- est.peak.sd
+
+  # Fix the position of generation 0
+  #fixed <- starts[c("gen0.mean")]
+  #fixed <- starts[grep("mean", names(starts))]
+  fixed  <- NULL
+  starts <- starts[!names(starts) %in% names(fixed)]
+
+  #-----------------------------------------------------------------------------
+  # Determine the limits of optimization of peak positions
+  upper        <- rep(Inf, length(starts))
+  names(upper) <- names(starts)
+  lower        <- rep(0, length(starts))
+  names(lower) <- names(starts)
+
+  # Allow initial peak positions to vary by opt.peak.pos.dev
+  # Defaults to the estimated sd of the peak
+  # Prevents peaks shifting too much
+  if (is.null(opt.peak.pos.dev)) {
+    opt.peak.pos.dev <- starts$peak.sd
+  }
+
+  par.means        <- grep("mean", names(starts))
+  upper[par.means] <- as.numeric(starts[par.means]) + opt.peak.pos.dev
+  lower[par.means] <- as.numeric(starts[par.means]) - opt.peak.pos.dev
+
+
+  # Create environment to store iterations
+  opt.env <- opt.new.env(nrow(peak.stats))
+  #opt.new.env(nrow(peak.stats))
+
+  if (mode == "LS") {
+    #-----------------------------------------------------------------------------
+    # Optimize parameters using least squares
+    final.par <- opt.prolif.model.ls(x.mids,
+                                     y.smth,
+                                     starts=starts,
+                                     upper=upper,
+                                     lower=lower,
+                                     fixed=fixed,
+                                     peak.stats=peak.stats,
+                                     plot=plot,
+                                     opt.env=opt.env)
+
+
+    # total events captured by the model
+    #total.events <- sum(y[x > peak.stats[nrow(peak.stats),"opt_mean"] - 3*(peak.stats[nrow(peak.stats),"opt_peak_sd"]) ])
+
+    # Get the model prediction
+    y.pred.optim <- prolif.model.wrapper(final.par,
+                                         nrow(peak.stats),
+                                         x=x.mids)
+    total.events <- sum(y.pred.optim)
+
+  } else if (mode == "MLE") {
+    #-----------------------------------------------------------------------------
+    # Optimize parameters using MLE
+    # For MLE we optimize over densities, so scale summits so they are the
+    # relative mixture between distributions rather then the number of events
+    starts[summit.names] <- as.numeric(starts[summit.names]) / sum(as.numeric(starts[summit.names]))
+    upper[summit.names]  <- 1
+
+    final.par <- opt.prolif.model.mle(log10(trace),
+                                      starts=starts,
+                                      upper=upper,
+                                      lower=lower,
+                                      fixed=fixed,
+                                      peak.stats=peak.stats,
+                                      plot=plot,
+                                      opt.env=opt.env)
+
+    total.events <- length(trace)
+    binwidth <- (x.mids[2] - x.mids[1])
+
+    # Scale the density to so they match counts as the prediction
+    y.pred.optim <- prolif.model.wrapper(final.par,
+                                         nrow(peak.stats),
+                                         x=x.mids,
+                                         type="density") #* (total.events / length(x.mids))
+
+    y.pred.optim <- (y.pred.optim*binwidth) * total.events
+  } else {
+    stop(simpleError("No valid mode provided, must be LS or MLE."))
+  }
+
+  mtext(plot.main, side = 3, line = -2, outer = TRUE)
+  par(mfrow=c(1,1))
+
+  # Clear environment with optimization results
+  rm("opt.env")
+
+  #-----------------------------------------------------------------------------
+  if (plot) {
 
     ####
-    plot(x, cur.hist$counts,
+    plot(x.mids, cur.hist$counts,
          main="Optimal fit vs data",
          xlab="Bin average log10(CTV)",
          ylab="Count",
          pch=20,
          col="grey", bty="n")
-    lines(y.pred.optim ~ x, lwd=2, col="red")
+    lines(y.pred.optim ~ x.mids, lwd=2, col="red")
 
     legend("topleft",
            legend=c("Data", "Optimized fit"),
            fill=c("grey", "red"),
            bty="n")
-
   }
-  #####
+
 
   # Add the optimized values to the table
   peak.stats$opt_mean    <- as.numeric(final.par[mean.names])
   peak.stats$opt_summit  <- as.numeric(final.par[summit.names])
-  peak.stats$opt_peak_sd <- as.numeric(final.par$peak.sd)
+  peak.stats$opt_peak_sd <- as.numeric(final.par[sd.names])
 
+  #-----------------------------------------------------------------------------
   # Determine the area of each generation
-  for (i in 1:n.peaks) {
-    int.res <- integrate(gaussian.prolif.single.peak,
-                         lower=min(x),
-                         upper=max(x),
+  # In this case as we fix sd above, could also take the ratio of the summits
+  for (i in 1:nrow(peak.stats)) {
+    int.res <- integrate(prolif.single.peak,
+                         lower=min(log10(trace)),
+                         upper=max(log10(trace)),
                          mean=as.numeric(final.par[mean.names[i]]),
                          summit=as.numeric(final.par[summit.names[i]]),
-                         sd=as.numeric(final.par$peak.sd))
+                         sd=as.numeric(final.par[sd.names]))
 
     peak.stats[i,"peak_area"]       <- int.res$value
     peak.stats[i,"peak_area_error"] <- int.res$abs.error
   }
 
-  peak.stats$peak_area_prop <- (peak.stats$peak_area / sum(peak.stats$peak_area)) *100
-
-  # Events within the peak range
-  #total.events <- sum(y[x > peak.stats[nrow(peak.stats),"opt_mean"] - 3*(peak.stats[nrow(peak.stats),"opt_peak_sd"]) ])
-  total.events <- sum(gaussian.prolif.model(peak.stats$opt_mean, peak.stats$opt_peak_sd, peak.stats$opt_summit, x))
+  #-----------------------------------------------------------------------------
+  peak.stats$peak_area_prop   <- (peak.stats$peak_area / sum(peak.stats$peak_area)) *100
+  peak.stats$peak_summit_prop <- (peak.stats$opt_summit / sum(peak.stats$opt_summit)) *100
 
   # Determine total number of events in a peak
   peak.stats$peak_events <- total.events * (peak.stats$peak_area_prop/100)
@@ -542,6 +902,11 @@ fit.peaks.ls <- function(cur.trace,
   }
 
   peak.stats$peak_ancestors <- tmp
+
+
+
+
+
   return(peak.stats)
 }
 
