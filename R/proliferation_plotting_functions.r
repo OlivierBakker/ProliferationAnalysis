@@ -73,7 +73,8 @@ opt.plot.params <- function(x, opt.env) {
        col=cols[i],
        bty="n",
        main="Optim - SD",
-       type="l")
+       type="l",
+       ylim=c(min(opt.env[["sd"]]), max(opt.env[["sd"]])))
 
   for (i in 2:ncol(opt.env[["sd"]])) {
     lines(1:n.iter,

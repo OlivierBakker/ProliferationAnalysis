@@ -209,9 +209,10 @@ prolif.model.wrapper <- function(par, n.peaks, x, fixed=NULL, type="prolif_model
   par        <- as.numeric(par)
   names(par) <- names
 
-
   mean.names   <- paste0("gen", 0:(n.peaks-1), ".mean")
   summit.names <- paste0("gen", 0:(n.peaks-1), ".summit")
+
+  #genX.sd      <- paste0("gen", n.peaks, ".sd")
 
   if (!is.null(fixed)) {
     par <- c(par, fixed)
@@ -223,6 +224,12 @@ prolif.model.wrapper <- function(par, n.peaks, x, fixed=NULL, type="prolif_model
 
   if (length(sd.vec)==1) {
     sd.vec <- rep(sd.vec, length(mean.vec))
+  }
+
+  if ("genX.sd" %in% names(par)){
+    if (!is.null(par[["genX.sd"]])) {
+      sd.vec[n.peaks] <- par[["genX.sd"]]
+    }
   }
 
   # Log the values to the optimization environment
@@ -270,32 +277,32 @@ prolif.resid <- function(par, n.peaks, x, y, fixed=NULL, opt.env=NULL) {
 #'
 #' @returns data frame with initial peak estimates
 
-find.initial.peaks <- function(cur.hist, y, peak.0.lower.bound,peak.thresh.enrich=1, peak.thresh.summit=0.05, peak.max=12, plot=F) {
-  peak0.mean       <- find.local.max(cur.hist$mids, y, peak.0.lower.bound, max(cur.hist$mids))
+find.initial.peaks <- function(x, y, peak.0.lower.bound, peak.thresh.enrich=1, peak.thresh.summit=0.05, peak.max=12, plot=F) {
+  peak0.mean       <- find.local.max(x, y, peak.0.lower.bound, max(x))
 
   if (is.na(peak0.mean)) {
     cat("[WARN] No values found in peak.0.lower.bound. Returning NA.\n")
     return(NULL)
   }
 
-  peak0.summit     <- y[nearest.index(cur.hist$mids, peak0.mean)]
+  peak0.summit     <- y[nearest.index(x, peak0.mean)]
 
   # Estimate position of next peak
   est.peak1     <- log10(10^peak0.mean/2)
   est.peak.dist <- peak0.mean - est.peak1
   #est.window    <- est.peak.dist/2
-  peak0.enrichment <- find.enrichment(cur.hist$mids, y, peak0.mean, est.peak.dist/2)
+  peak0.enrichment <- find.enrichment(x, y, peak0.mean, est.peak.dist/2)
 
   prev.peak.mean <- peak0.mean
   peak.stats     <- data.frame()
-  lim <- min(cur.hist$mids)
+  lim            <- min(x)
 
   for (i in 1:peak.max) {
 
     if (prev.peak.mean-est.peak.dist < lim) {
       next;
     }
-    res            <- find.next.peak(cur.hist$mids, y, prev.peak.mean, est.peak.dist/2)
+    res            <- find.next.peak(x, y, prev.peak.mean, est.peak.dist/2)
     peak.stats     <- rbind(peak.stats, res)
     prev.peak.mean <- res[1]
 
@@ -363,33 +370,6 @@ find.initial.peaks <- function(cur.hist, y, peak.0.lower.bound,peak.thresh.enric
   }
 
   peak.stats <- peak.stats[1:n.peaks,, drop=F]
-
-  #####
-  # Plot
-  if (plot) {
-    plot(cur.hist$mids,
-         cur.hist$counts,
-         main="Initial peak estimates",
-         ylab="Count",
-         xlab="Bin average log10(CTV)",
-         bty="n",
-         pch=20,
-         col="grey")
-    lines(cur.hist$mids, y, new=F, lwd=3, col="blue")
-    abline(v=peak0.mean, col="red", lwd=2)
-    abline(v=peak.0.lower.bound, col="red", lty=2)
-
-    for (i in 2:nrow(peak.stats)) {
-      abline(v=peak.stats[i, 1], lwd=2, col="grey")
-    }
-
-    legend("topleft",
-           legend=c("Smoothed data", "Gen0"),
-           fill=c("blue", "red"),
-           bty="n")
-
-  }
-  #####
 
   return(peak.stats)
 }
@@ -542,23 +522,25 @@ opt.prolif.model.ls <- function(x, y, starts, upper, lower, fixed, peak.stats, p
 
 
 #-------------------------------------------------------------------------------
-#' Fit a proliferation model using least squares
+#' Fit a proliferation model using least squares or maximum likelihood
 #'
-#' Fit peaks on a CTV or CFSE or other tracking dye trace using a binned approach.
-#' The trace should be raw per event data from the FCS file on the CTV+ population.
+#' Fit peaks on a CTV or CFSE or other tracking dye trace using a binned
+#' or maximum liklihood approach.
+#' The trace should be raw per event data from the FCS file on the CTV+
+#' population.
 #'
 #' @details
 #' As a proliferation model, a guassian mixture distribution is fit.
 #' Initial parameters (number of peaks, peak means, peak summits) are estimated
-#' using a simple approach where first the generation zero peak is estimated based
-#' on 'peak.0.lower.bound' on smoothed data. The bins are smoothed using a
+#' using a simple approach where first the generation zero peak is estimated
+#' based on 'peak.0.lower.bound' on smoothed data. The bins are smoothed using a
 #' nearest neighbour smoother in the window provided.
 #'
-#' Peaks are only called if they exceed peak.thresh.enrich, the relative enrichment
-#' between the valley's either side of the peak and the peak summit. Peaks
-#' must also be adjacent. So if peak 2 does not pass peak.thresh.enrich but peak
-#' 3 does, only 2 peaks are fit. This is done to avoid fitting many peaks in the
-#' marginal count range.
+#' Peaks are only called if they exceed peak.thresh.enrich, the relative
+#' enrichment between the valley's either side of the peak and the peak summit.
+#' Peaks must also be adjacent. So if peak 2 does not pass peak.thresh.enrich
+#' but peak 3 does, only 2 peaks are fit. This is done to avoid fitting many
+#' peaks in the marginal count range.
 #'
 #' Using the gen0 peak the subsequent peak position is estimated, after which
 #' the summit is found and the peak mean updated to the local summit. This is
@@ -571,46 +553,12 @@ opt.prolif.model.ls <- function(x, y, starts, upper, lower, fixed, peak.stats, p
 #' optimise with respect to the resdiual sum of squares between the model
 #' and the smoothed trace.
 #'
+#' # opt.peak.pos.dev
 #' opt.peak.pos.dev controls the range peaks are allowed to vary in position
 #' during optimization. Defaults to +- half the estimated peak distance (NULL).
 #' To ignore this, set to Inf. This setting avoids the optimizer putting peaks
-#' in the left tail that sometimes might be present.
-#'
-#' @param trace raw FACS intensities
-#' @param peak.0.lower.bound the value on log10 scale where the first valley is
-#' @param peak.thresh.enrich fold change over valley to call peak in initial estimation (default 1)
-#' @param peak.thresh.summit minimum height of a peak in percentage of total heights (default 0.05)
-#' @param peak.max the maximum number of peaks to search for (default 12)
-#' @param bins number of bins for fitting (default 250)
-#' @param smoothing.window number of values up and downstream for the NN smoother (default 2)
-#' @param plot should results be plotted
-#' @param plot.optim should optimization plot be plotted
-#' @param plot.final should final plot of optimized fit be plotted
-#' @param plot.main title for the plot
-#' @param opt.peak.pos.dev limits the range in x where peak positions can be optimized within
-#' @param opt.trim.left.tail  Should values that fall outside the initial model range be removed from optimization. See @details
-#' @param opt.trim.right.tail Should values that fall outside the initial model range be removed from optimization. See @details
-#' @param mode either LS for least squares or 'MLE' for maximum likelihood estimation based optimizer. See @details
-#' @param full.out If true output a list with everything needed to easily re-make plots. Usefull if you want to regen plots in ggplot for instance.
-
-#' @returns A data frame with peak statistics or list of objects if full.out=T
-#'
-#' @examples
-#'
-#' # Simulate proliferation data
-#' y <- 10 ^ rnorm(1000, mean=10, sd=0.05)
-#' y <- c(y/4, y/2, y)
-#'
-#' # Fit peaks
-#' peaks <- fit.peaks(y, peak.0.lower.bound=9.8)
-#'
-#' # Simulate proliferation data #2
-#' y <- 10 ^ rnorm(1000, mean=10, sd=0.05)
-#' y <- c((y/8)[1:500], y/4, y/2, y[1:500])
-#'
-#' peaks <- fit.peaks(y, peak.0.lower.bound=9.9, mode="MLE")
-#'
-#' @details
+#' in the left tail that sometimes might be present or seperating peaks into
+#' nonsensical distances.
 #'
 #' # opt.trim.left.tail / opt.trim.right.tail
 #' Removes values (MLE) or sets count to zero (LS) of values that fall outside
@@ -634,6 +582,57 @@ opt.prolif.model.ls <- function(x, y, starts, upper, lower, fixed, peak.stats, p
 #' In practice I have found very little difference between these two when the
 #' setup is performed correctly.
 #'
+#' @param trace raw FACS intensities
+#' @param peak.0.lower.bound the value on log10 scale where the first valley is
+#' @param peak.thresh.enrich fold change over valley to call peak in initial
+#' estimation (default 1)
+#' @param peak.thresh.summit minimum height of a peak in percentage of total
+#' heights (default 0.05)
+#' @param peak.max the maximum number of peaks to search for (default 12)
+#' @param bins number of bins for fitting (default 250)
+#' @param smoothing.window number of values up and downstream for the NN
+#' smoother (default 2)
+#' @param plot should results be plotted. Overrides plot.optim & plot.final
+#' @param plot.optim should optimization plots be plotted
+#' @param plot.final should final plot of optimized fit be plotted
+#' @param plot.main title for the plot
+#' @param opt.peak.pos.dev limits the range in x where peak positions can be
+#' optimized within. See @details
+#' @param opt.trim.left.tail  Should values that fall outside the initial model
+#' range be removed from optimization. See @details
+#' @param opt.trim.right.tail Should values that fall outside the initial model
+#' range be removed from optimization. See @details
+#' @param mode either LS for least squares or 'MLE' for maximum likelihood
+#' estimation based optimizer. See @details
+#' @param full.out If true output a list with everything needed to easily
+#' re-make plots. Useful if you want to regen plots in ggplot for instance.
+#' @param peak.x.model Should an extra peak be fit that models a trace negative
+#' population of cells. See @details
+#' @param peak.x.upper.bound If peak.x.model=T, specify the hard limit for
+#' finding the mode of peak x. Set to NULL for no limit. (default NULL)
+#' @param peak.x.thresh.summit Controls the automated detection of the mode of
+#' peak x. Only peaks with a % of the total data mode of this are considered.
+#' Should be valued between 0-1. (default 0.05)
+#' @param peak.x.thresh.enrich Similar to peak.thresh.enrich but for peak x.
+#' (default = 1.1)
+#'
+#' @returns A data frame with peak statistics or list of objects if full.out=T
+#'
+#' @examples
+#'
+#' # Simulate proliferation data
+#' y <- 10 ^ rnorm(1000, mean=10, sd=0.05)
+#' y <- c(y/4, y/2, y)
+#'
+#' # Fit peaks
+#' peaks <- fit.peaks(y, peak.0.lower.bound=9.8)
+#'
+#' # Simulate proliferation data #2
+#' y <- 10 ^ rnorm(1000, mean=10, sd=0.05)
+#' y <- c((y/8)[1:500], y/4, y/2, y[1:500])
+#'
+#' peaks <- fit.peaks(y, peak.0.lower.bound=9.9, mode="MLE")
+#'
 #' @export
 fit.peaks  <- function(trace,
                       peak.0.lower.bound,
@@ -650,6 +649,8 @@ fit.peaks  <- function(trace,
                       full.out=F,
                       peak.x.model=F,
                       peak.x.upper.bound=NULL,
+                      peak.x.thresh.summit=0.05,
+                      peak.x.thresh.enrich=1.1,
                       ...) {
 
   # Plotting
@@ -666,7 +667,67 @@ fit.peaks  <- function(trace,
   y.smth     <- nn.smoother(cur.hist$counts, window=smoothing.window)
   y.raw      <- log10(trace)
 
-  peak.stats <- find.initial.peaks(cur.hist, y.smth, peak.0.lower.bound, plot = plot.optim,...)
+  peak.stats <- find.initial.peaks(cur.hist$mids, y.smth, peak.0.lower.bound, plot = plot.optim,...)
+  #peak.stats <- find.initial.peaks(cur.hist$mids, y.smth, peak.0.lower.bound, plot = plot.optim)
+
+  #-----------------------------------------------------------------------------
+  # Roughly estimate peak X and update stats table
+  if (peak.x.model) {
+    peak.x.mode <- find.peak.x.approx.mode(y.raw,
+                                           peak.x.thresh.summit=peak.x.thresh.summit,
+                                           peak.x.thresh.enrich=peak.x.thresh.enrich,
+                                           peak.x.upper.bound=peak.x.upper.bound)
+
+    est.smt   <- y.smth[nearest.index(cur.hist$mids, peak.x.mode)]
+
+    est.peak.dist <- peak.stats[1,1] - peak.stats[2,1]
+    est.enrich <- find.enrichment(cur.hist$mids, y.smth, peak.x.mode, est.peak.dist/2)
+
+    # Only keep peaks with estimated peak sd from the mode
+    peak.stats <- peak.stats[peak.stats$est_mean > (peak.x.mode + est.peak.dist),]
+
+    peak.stats <- rbind(peak.stats,
+                        c(peak.x.mode, est.smt, est.enrich, nrow(peak.stats)+1, nrow(peak.stats), 0))
+
+    peak.stats$est_summit_percentage <- peak.stats$est_summit / sum(peak.stats$est_summit)
+  }
+
+  #####
+  # Plot
+  if (plot.optim) {
+    plot(cur.hist$mids,
+         cur.hist$counts,
+         main="Initial peak estimates",
+         ylab="Count",
+         xlab="Bin average log10(CTV)",
+         bty="n",
+         pch=20,
+         col="grey")
+
+    lines(cur.hist$mids, y.smth, new=F, lwd=3, col="blue")
+    abline(v=peak.stats[1, 1], col="red", lwd=2)
+    abline(v=peak.0.lower.bound, col="red", lty=2)
+
+    for (i in 2:nrow(peak.stats)) {
+      abline(v=peak.stats[i, 1], lwd=2, col="grey")
+    }
+
+    if (peak.x.model) {
+      abline(v=peak.x.mode, col="orange", lwd=2)
+      abline(v=peak.x.upper.bound, col="orange", lty=2)
+
+      legend("topleft",
+             legend=c("Smoothed data", "Gen0", "GenX"),
+             fill=c("blue", "red", "orange"),
+             bty="n")
+    } else {
+      legend("topleft",
+             legend=c("Smoothed data", "Gen0"),
+             fill=c("blue", "red"),
+             bty="n")
+    }
+  }
+  #####
 
   # If just generation zero is left, do not proceed to optimization
   if (nrow(peak.stats)==1) {
@@ -707,6 +768,7 @@ fit.peaks  <- function(trace,
   est.peak.sd <- sd(xx)
   peak.stats[,"est_peak_sd"] <- est.peak.sd
 
+
   #-----------------------------------------------------------------------------
   # Starting parameter list
   starts          <- c(as.list(peak.stats$est_mean), as.list(peak.stats$est_summit))
@@ -745,6 +807,13 @@ fit.peaks  <- function(trace,
   opt.env <- opt.new.env(nrow(peak.stats))
   #opt.new.env(nrow(peak.stats))
 
+  # Add the constraints and start for genX
+  if (peak.x.model) {
+    starts[["genX.sd"]] <- starts$peak.sd*2
+    lower[["genX.sd"]]  <- lower["peak.sd"]
+    upper[["genX.sd"]]  <- upper["peak.sd"]
+  }
+
   if (mode == "LS") {
     #-----------------------------------------------------------------------------
     # Optimize parameters using least squares
@@ -766,6 +835,7 @@ fit.peaks  <- function(trace,
                                          nrow(peak.stats),
                                          x=x.mids)
     total.events <- sum(y.pred.optim)
+
 
   } else if (mode == "MLE") {
     #-----------------------------------------------------------------------------
@@ -857,6 +927,68 @@ fit.peaks  <- function(trace,
     return(peak.stats)
   }
 }
+
+
+
+#-------------------------------------------------------------------------------
+#'
+find.peak.x.approx.mode <- function(trace, peak.x.thresh.summit, peak.x.thresh.enrich, peak.x.upper.bound=NULL, ...) {
+
+  if (is.null(peak.x.upper.bound)) {
+    peak.x.upper.bound <- max(trace)
+  }
+
+  # Calculate the kernel density estimate of the trace
+  dens <- density(trace, ...)
+
+  # Scale by the mode of the trace, so the mode is 1
+  d     <- dens$y / max(dens$y)
+
+  # Filter scaled density estimate on peak height
+  dd    <- d[d > peak.x.thresh.summit]
+
+  # If there are too few values passing peak.x.thresh.summit return
+  if (length(dd) < 3) {
+    return(NULL)
+  }
+
+  # Keep track of the x values matching dd
+  xx    <- dens$x[d >peak.x.thresh.summit]
+
+  # Find the max value and exit after some level of enrichment has been reached
+  max.d <- 0
+  for (i in 1:length(dd)) {
+    if (dd[i] > max.d) {
+      max.d <- dd[i]
+    }
+    if ((max.d/dd[i]) >= peak.x.thresh.enrich) {
+      break
+    }
+  }
+
+  # Which x value matches the estimated mode
+  max.x <- xx[which(dd == max.d)]
+
+  # If the max value falls outside the hard limit return the x where the largest
+  # density is found within that limit
+  if (max.x > peak.x.upper.bound) {
+    msg <- "Max value not found at specified threshold. Returning mode witin hard limit set by peak.x.upper.bound"
+    warning(simpleWarning(msg))
+
+    tmp <- dd[xx < peak.x.upper.bound]
+
+    if (length(tmp) > 2) {
+      return(xx[which(dd ==  max(tmp))])
+    } else {
+      return(NULL)
+    }
+
+  } else {
+    return(max.x)
+  }
+}
+
+
 
 #-------------------------------------------------------------------------------
 #' Get proliferation statistics

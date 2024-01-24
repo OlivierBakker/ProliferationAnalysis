@@ -265,22 +265,86 @@ Please read example one first before moving on to this as many of the prinicples
 are shared.
 
 
+By specifying peak.x.model a special generation is added to the model which has
+its own standard deviation and position. This is free from the constraints set
+by the prolferation model. This is usefull if the trace has been done on a 
+mixture of stained and unstained cells, which might bleed over into each other.
 
-Not yet implemented
+This will yield proper estimates of cell counts in later peaks where there is
+bleedover, wheras gating will over-estimate cell counts.
+```{r}
+
+# Fit sample accounting for bleedover 
+fit.a <- fit.peaks(trace=sample.b,
+                   peak.0.lower.bound=gen0.cutoff,
+                   mode="LS",
+                   opt.trim.left.tail = F,
+                   opt.trim.right.tail = T,
+                   peak.x.model = T,
+                   plot.optim=F)
+
+
+get.prolif.stats(fit.a[1:7,])
+
+# Fit sample by gating and ignoring bleedover
+fit.b <- fit.peaks(trace=sample.b,
+                   peak.0.lower.bound=gen0.cutoff,
+                   mode="LS",
+                   opt.trim.left.tail = T,
+                   opt.trim.right.tail = T,
+                   peak.max=6,
+                   peak.x.model = F,
+                   plot.optim=F)
+
+get.prolif.stats(fit.b)
+
+cols  <- palette.colors(n = nrow(fit.b), recycle = T)
+
+plot(fit.a[1:7,]$peak_area_prop,
+     fit.b$peak_area_prop,
+     xlim=c(5,25),
+     ylim=c(5,25),
+     col=cols,
+     pch=20,
+     cex=2,
+     xlab="Relative peak height - with peak x",
+     ylab="Relative peak height - no peak x")
+abline(a=0, b=1, lty=2)
+legend("topright",
+       legend=paste0("Gen", fit.a[1:7,]$generation),
+       fill=cols)
+
+```
+
+
 
 
 ```{r, eval=F, echo=F}
 # Development area
+library(ProliferationAnalysis)
+data("ctv_example")
+
+
+
+sample.b <- ctv[[28]]
+sample.b <- ctv[[36]]
+gen0.cutoff <- 5.3
+
+fit <- fit.peaks(trace=sample.b,
+                 peak.0.lower.bound=gen0.cutoff,
+                 mode="LS",
+                 opt.trim.left.tail = F,
+                 opt.trim.right.tail = T,
+                 peak.x.model = T,
+                 peak.thresh.enrich=1,
+                 peak.thresh.summit=0
+                 )
+
 
 source("R/proliferation_modeling_functions.r")
 source("R/proliferation_plotting_functions.r")
-
-sample.b <- ctv[[28]]
-
-
 trace               <- sample.b
 peak.0.lower.bound  <- 5.3
-peak.x.upper.bound  <- 3.9
 bins                <- 250
 smoothing.window    <- 2
 plot.optim          <- T
@@ -292,9 +356,21 @@ opt.trim.left.tail  <- T
 mode                <- "LS"
 full.out            <- F
 
+
+peak.x.model             <- T
+peak.x.upper.bound       <- 4  # Optional hard limit for peak x
+peak.x.summit.cutoff     <- 0.05 # Peak summit must be at least 5% of the data mode
+peak.x.summit.enrichment <- 1.2  # threshold for stopping
+
+peak.x.mode <- find.peak.x.approx.mode(log10(sample.b),
+                                       peak.x.summit.cutoff=peak.x.summit.cutoff,
+                                       peak.x.summit.enrichment=peak.x.summit.enrichment,
+                                       peak.x.upper.bound=peak.x.upper.bound)
+
 plot(density(log10(sample.b)), type="l")
 abline(v=peak.0.lower.bound, lty=2)
 abline(v=peak.x.upper.bound, lty=2)
+abline(v=peak.x.mode, lty=2, col="blue")
 
 ```
 
