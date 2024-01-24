@@ -505,7 +505,6 @@ opt.prolif.model.ls <- function(x, y, starts, upper, lower, fixed, peak.stats, p
   }
 
   #####
-  # See how residual sum of squares changes
   if (plot) {
 
     # Plot parameters over optimization
@@ -589,7 +588,8 @@ opt.prolif.model.ls <- function(x, y, starts, upper, lower, fixed, peak.stats, p
 #' @param plot.final should final plot of optimized fit be plotted
 #' @param plot.main title for the plot
 #' @param opt.peak.pos.dev limits the range in x where peak positions can be optimized within
-#' @param opt.trim.left.tail Should values that fall outside the model range bet set to zero
+#' @param opt.trim.left.tail  Should values that fall outside the initial model range be removed from optimization. See @details
+#' @param opt.trim.right.tail Should values that fall outside the initial model range be removed from optimization. See @details
 #' @param mode either LS for least squares or 'MLE' for maximum likelihood estimation based optimizer. See @details
 #' @param full.out If true output a list with everything needed to easily re-make plots. Usefull if you want to regen plots in ggplot for instance.
 
@@ -611,6 +611,11 @@ opt.prolif.model.ls <- function(x, y, starts, upper, lower, fixed, peak.stats, p
 #' peaks <- fit.peaks(y, peak.0.lower.bound=9.9, mode="MLE")
 #'
 #' @details
+#'
+#' # opt.trim.left.tail / opt.trim.right.tail
+#' Removes values (MLE) or sets count to zero (LS) of values that fall outside
+#' 1sd of the initial model space. This essentially functions as an auto gate
+#' after identifying initial peak positions.
 #'
 #' # mode
 #' The package offers two optimization schemes:
@@ -639,9 +644,12 @@ fit.peaks  <- function(trace,
                       plot=T,
                       plot.main = "Proliferation model",
                       opt.peak.pos.dev=NULL,
-                      opt.trim.left.tail=T,
+                      opt.trim.left.tail=F,
+                      opt.trim.right.tail=F,
                       mode="LS",
                       full.out=F,
+                      peak.x.model=F,
+                      peak.x.upper.bound=NULL,
                       ...) {
 
   # Plotting
@@ -656,6 +664,7 @@ fit.peaks  <- function(trace,
 
   # Nearest neighbor smoother
   y.smth     <- nn.smoother(cur.hist$counts, window=smoothing.window)
+  y.raw      <- log10(trace)
 
   peak.stats <- find.initial.peaks(cur.hist, y.smth, peak.0.lower.bound, plot = plot.optim,...)
 
@@ -669,7 +678,6 @@ fit.peaks  <- function(trace,
   # Estimate starting parameters
   #-----------------------------------------------------------------------------
   x.mids        <- cur.hist$mids
-  y.smth        <- y.smth
   est.gen0.mean <- peak.stats[1, "est_mean"] # Starting generation mean
   est.peak.dist <- est.gen0.mean - peak.stats[2, "est_mean"] # Distance between peaks
 
@@ -679,8 +687,15 @@ fit.peaks  <- function(trace,
   # the optimization can reach a wrong optimum by increasing the peak sd too
   # much, so we only want to optimize around the peaks
   if (opt.trim.left.tail) {
-    lower.lim <- peak.stats[nrow(peak.stats),"est_mean"] -  (est.peak.dist/2)
+    lower.lim                  <- peak.stats[nrow(peak.stats),"est_mean"] -  (est.peak.dist/2)
     y.smth[x.mids < lower.lim] <- 0
+    y.raw                      <- y.raw[y.raw > lower.lim]
+  }
+
+  if (opt.trim.right.tail) {
+    upper.lim                  <- peak.stats[1,"est_mean"] +  (est.peak.dist/2)
+    y.smth[x.mids > upper.lim] <- 0
+    y.raw                      <- y.raw[y.raw < upper.lim]
   }
 
   #-----------------------------------------------------------------------------
@@ -760,7 +775,7 @@ fit.peaks  <- function(trace,
     starts[summit.names] <- as.numeric(starts[summit.names]) / sum(as.numeric(starts[summit.names]))
     upper[summit.names]  <- 1
 
-    final.par <- opt.prolif.model.mle(log10(trace),
+    final.par <- opt.prolif.model.mle(y.raw,
                                       starts=starts,
                                       upper=upper,
                                       lower=lower,
@@ -769,7 +784,7 @@ fit.peaks  <- function(trace,
                                       plot=plot.optim,
                                       opt.env=opt.env)
 
-    total.events <- length(trace)
+    total.events <- length(y.raw)
     binwidth <- (x.mids[2] - x.mids[1])
 
     # Scale the density to so they match counts as the prediction
@@ -785,8 +800,8 @@ fit.peaks  <- function(trace,
 
   if (plot.optim) {
     mtext(plot.main, side = 3, line = -2, outer = TRUE)
+    par(mfrow=c(1,1))
   }
-  par(mfrow=c(1,1))
 
   # Clear environment with optimization results
   rm("opt.env")
@@ -806,8 +821,8 @@ fit.peaks  <- function(trace,
   # In this case as we fix sd above, could also take the ratio of the summits
   for (i in 1:nrow(peak.stats)) {
     int.res <- integrate(prolif.single.peak,
-                         lower=min(log10(trace)),
-                         upper=max(log10(trace)),
+                         lower=min(y.raw),
+                         upper=max(y.raw),
                          mean=as.numeric(final.par[mean.names[i]]),
                          summit=as.numeric(final.par[summit.names[i]]),
                          sd=as.numeric(final.par[sd.names]))

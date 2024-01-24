@@ -155,57 +155,29 @@ behavior is not limited to the MLE optimizer, it just so happens this
 particular combination of data sends the optimizer down this path and the way
 the constraints are setup in the different modes.
 
-This can be solved in 2 ways:
+This can be solved in 3 ways:
+
 
 #### Option 1
-Fix the fit by strictly gating out the on the CTV- and CTV ++ tails. 
-This is a simple solution but keep in mind that it might not be the most 
-accurate. In practicethis is well within reasonable limits to do, as you would 
-also do this in common software such as FlowJo or FCS express. This gating can 
-easily be performed on all your samples in CytoExploreR or other FCS analysis 
-packages.
-
-
-```{r, echo=T, out.width="100%", fig.dim=c(10, 6)}
-fit <- fit.peaks(trace=sample.a[log10(sample.a) > 4 & log10(sample.a) < 5.6],
-                 peak.0.lower.bound=gen0.cutoff,
-                 mode="MLE")
-```
-
-#### Option 2
-Allow more peaks to be fit in the model by relaxing initial estimation
-thresholds. This can be achieved by tweaking peak.thresh.enrich,
-peak.thresh.summit and peak.max. Some amount of gating may still be needed 
-to avoid this issue as MLE is quite sensitive to optimizing the likelihood so
-the tails are included.
-
-In least squares mode this issue is avoided by trimming the left tail to zero 
-prior to optimization for values outside the model range. This is effectively
-equivalent to setting a strict gate on the model range.
-
-
-```{r, echo=T, out.width="100%", fig.dim=c(10, 6)}
-fit <- fit.peaks(trace=sample.a[log10(sample.a) > 3 & log10(sample.a) < 5.6],
-                 peak.0.lower.bound=gen0.cutoff,
-                 mode="MLE",
-                 peak.thresh.enrich=0,
-                 peak.thresh.summit=0)
-```
-
-If we now run the same parameters using NLS we will see we will find a similar
-model.
-
+Enable the "auto gating" by trimming left and right tails that fall outside of
+the initial model range. The initial peak estimates are first made on the full
+trace that is supplied. Then the values within one peak sd outside are removed
+in mode="MLE" or bins set to zero count in mode="LS". This prevents the
+optimizers from fitting to the tails. The only sacrifice here is a small loss
+in accuracy and potentially an issue if the initial parameter estimates are way
+off, so carefully check its working as intended.
 
 ```{r, echo=T, out.width="100%", fig.dim=c(10, 6)}
 fit <- fit.peaks(trace=sample.a,
                  peak.0.lower.bound=gen0.cutoff,
-                 mode="LS",
-                 peak.thresh.enrich=0,
-                 peak.thresh.summit=0,
-                 plot.optim=F)
+                 mode="MLE",
+                 opt.trim.left.tail = T,
+                 opt.trim.right.tail = T)
 ```
 
-We can control the trimming of the tail using the option opt.trim.left.tail
+We can control the trimming of the tail using the options
+opt.trim.right.tail and opt.trim.left.tail
+
 In this case it makes little difference due to the way parameter constraints
 are setup. But this can be sample specific!
 
@@ -234,9 +206,97 @@ fit <- fit.peaks(trace=sample.a,
 par(mfrow=c(1,1))
 ```
 
+#### Option 2
+Fix the fit by strictly gating out the on the CTV- and CTV ++ tails prior
+to running.
 
-## Example one
+This is a simple solution but keep in mind that it might not be the most 
+accurate as with the "auto gating". The advantage over option 1 is that
+here the initial peak estimates are also limited to this range.
+
+In practice this is well within reasonable limits to do, as you would 
+also do this in common software such as FlowJo or FCS express. This gating can 
+easily be performed on all your samples in CytoExploreR or other FCS analysis 
+packages.
+
+```{r, echo=T, out.width="100%", fig.dim=c(10, 6)}
+fit <- fit.peaks(trace=sample.a[log10(sample.a) > 4 & log10(sample.a) < 5.6],
+                 peak.0.lower.bound=gen0.cutoff,
+                 mode="MLE")
+```
+
+#### Option 3
+Allow more peaks to be fit in the model by relaxing initial estimation
+thresholds. This can be achieved by tweaking peak.thresh.enrich,
+peak.thresh.summit and peak.max. Some amount of gating may still be needed 
+to avoid this issue as MLE is quite sensitive to optimizing the likelihood so
+the tails are included.
+
+The disadvantage here is that you might include many more peaks, increasing
+model complexity, and which are not likely to be very accurate as in lower 
+ranges the proliferation traces are less reliable.
+
+```{r, echo=T, out.width="100%", fig.dim=c(10, 6)}
+fit <- fit.peaks(trace=sample.a,
+                 peak.0.lower.bound=gen0.cutoff,
+                 mode="MLE",
+                 peak.thresh.enrich=0,
+                 peak.thresh.summit=0,
+                 opt.trim.right.tail=T)
+```
+
+If we now run the same parameters using NLS we will see we will find a similar
+model.
+```{r, echo=T, out.width="100%", fig.dim=c(10, 6)}
+fit <- fit.peaks(trace=sample.a,
+                 peak.0.lower.bound=gen0.cutoff,
+                 mode="LS",
+                 peak.thresh.enrich=0,
+                 peak.thresh.summit=0,
+                 opt.trim.right.tail=T,
+                 plot.optim=F,
+)
+```
+
+
+## Example Two
+
+Please read example one first before moving on to this as many of the prinicples
+are shared.
+
 
 
 Not yet implemented
+
+
+```{r, eval=F, echo=F}
+# Development area
+
+source("R/proliferation_modeling_functions.r")
+source("R/proliferation_plotting_functions.r")
+
+sample.b <- ctv[[28]]
+
+
+trace               <- sample.b
+peak.0.lower.bound  <- 5.3
+peak.x.upper.bound  <- 3.9
+bins                <- 250
+smoothing.window    <- 2
+plot.optim          <- T
+plot.final          <- T
+plot                <- T
+plot.main           <- "Proliferation model"
+opt.peak.pos.dev    <- NULL
+opt.trim.left.tail  <- T
+mode                <- "LS"
+full.out            <- F
+
+plot(density(log10(sample.b)), type="l")
+abline(v=peak.0.lower.bound, lty=2)
+abline(v=peak.x.upper.bound, lty=2)
+
+```
+
+
 
