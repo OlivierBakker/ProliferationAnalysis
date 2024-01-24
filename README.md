@@ -13,7 +13,7 @@ devtools::install_github("https://github.com/OlivierBakker/ProliferationAnalysis
 
 # Example
 
-The following simulates some proliferation data and fits peaks to it
+The following simulates some proliferation data and fits peaks to it. For more detaills download the vingette html in the vingettes folder for it to render properly
 ```
 library(ProliferationAnalysis)
 library(minpack.lm)
