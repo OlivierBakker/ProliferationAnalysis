@@ -1,0 +1,242 @@
+---
+title: "Fitting a proliferation model with complex mixture"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+vignette: >
+  %\VignetteIndexEntry{fitting_proliferation_model}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+#tools::buildVignettes(dir = ".", tangle=TRUE)
+#dir.create("inst/doc")
+#file.copy(dir("vignettes", full.names=TRUE), "inst/doc", overwrite=TRUE)
+```
+
+# Introduction
+
+This vignette accompanies the ProliferationAnalysis package, to run semi
+automated proliferation models in a high throughput manner. It has options to
+deconvolute the effect of complex mixtures of cells where a stain negative
+population is present in the sample. These stain negative cells can unduly
+influence proliferation statistics.
+
+IMPORTANT NOTE: 
+This is NOT a guide to best practices to performing a proliferation experiment
+and assumes some basic knowledge on getting a FACS proliferation trace ready
+and evaluating its quality. This does NOT cover how to setup gates etc.
+
+```{r setup}
+library(ProliferationAnalysis)
+data("ctv_example")
+```
+
+
+### Example data {.tabset}
+
+The package comes bundled with some example traces.
+
+#### Sample with no mixture (sample.a)
+```{r, echo=T, out.width="100%", fig.dim=c(10, 6)}
+sample.a <- ctv[[10]]
+
+plot(density(log10(sample.a)),
+     type="l")
+```
+
+#### Sample with high mixture (sample.b)
+```{r, echo=T, out.width="100%", fig.dim=c(10, 6)}
+sample.b <- ctv[[28]]
+
+plot(density(log10(sample.b)),
+     type="l")
+
+```
+
+
+# Fitting a proliferation model to CTV traces {.tabset}
+
+The first step before we run proliferation modeling is to extract the raw per-cell
+CTV (other dyes are available) intensities from the .fcs files and gate on single
+cells \*. Depending on your goals, you can then proceed in two ways.
+
+1. If you have no mixture of cells I would recommend gating on the CTV+ population
+to avoid debris and CTV- cells affecting the fit. Then proceed with example 1.
+
+2. If you have a complex cell sample where only a portion of cells have been
+stained, proceed with example 2.
+
+
+\* This package does NOT handle this part, and would refer you to the plethora of
+FACS analysis options available in R. I quite like CytoExploreR for gating.
+
+## Example one
+
+### Step 0: Choose your optimizer
+
+The package offers two optimization schemes.
+
+1. Non linear least squares (LS) with mode="LS". Here the data is first binned
+and smoothed, then parameters are optimized over the smoothed trace using
+non linear least squares. This method is quick and robust, but relies on binning
+and some other data processing so is technically less accurate. 
+
+2. Maximum likelihood estimation (MLE) based with mode="MLE". This mode is a
+little more proper in that it does not rely on binning or other data tricks to
+optimize, and takes the full data set to optimize on directly. Initial parameter
+estimation is still done on a binned smoothed version of the data, but 
+optimization is not.
+
+In practice I have found very little difference between these two when the
+setup is performed correctly. Some examples below of issues you may encounter.
+
+### Step 1: Identify gen0
+First, Identify the rough cutoff where the undivided generation is. This cutoff needs
+to be left of the mode of gen 0. I recommend putting it into the valley after
+the first mode. This can be set in a consistent way for your samples using a 
+CytoExploreR gate by your negative control sample. In this case we will be
+setting it manually.
+
+Note this does not directly affect the fit, and is just used to find the mode of 
+gen0 in each sample.
+```{r, echo=T, out.width="100%", out.width="100%", fig.dim=c(10, 6)}
+gen0.cutoff <- 5.3
+
+plot(density(log10(sample.a)), type="l")
+abline(v=gen0.cutoff, lty=2)
+```
+
+
+### Step 2: fit peaks
+In the simplest case we can run fit.peaks, which estimates peak numbers 
+automatically. We will look later on at performing and tweaking a fit step by
+step.
+```{r, echo=T, out.width="100%", fig.dim=c(10, 6)}
+# Basic fit
+fit <- fit.peaks(trace=sample.a,
+                 peak.0.lower.bound=gen0.cutoff,
+                 mode="LS")
+```
+
+The first plot shows where the initial peak estimates are located, and how many
+peaks will be optimized over. The red line indicates the mode of peak 0
+the grey dotted line the lower cuttoff we set in the gen0.cutoff variable
+and the grey lines the modes of subsequent peaks. The next plots show the output
+of the optimization and how the initial parameters have changed during fitting.
+
+This can be useful to diagnose issues if you get weird looking fits.
+
+The final single plot shows the original trace vs the optimized model.
+
+
+### Step 3: Evaluate and diagnose issues {.tabset}
+If we run the same example again, but now using the MLE optimization procedure
+we can see something is off.
+
+
+```{r, echo=T, out.width="100%", fig.dim=c(10, 6)}
+# Basic fit with MLE goes wrong
+fit <- fit.peaks(trace=sample.a,
+                 peak.0.lower.bound=gen0.cutoff,
+                 mode="MLE")
+```
+
+In this case the left tail in the data is causing the most optimal fit to be
+a single distribution that covers the tail. This is clearly wrong and has as
+a cause that the automated peak estimates don't cover this tail. Note, this
+behavior is not limited to the MLE optimizer, it just so happens this
+particular combination of data sends the optimizer down this path and the way
+the constraints are setup in the different modes.
+
+This can be solved in 2 ways:
+
+#### Option 1
+Fix the fit by strictly gating out the on the CTV- and CTV ++ tails. 
+This is a simple solution but keep in mind that it might not be the most 
+accurate. In practicethis is well within reasonable limits to do, as you would 
+also do this in common software such as FlowJo or FCS express. This gating can 
+easily be performed on all your samples in CytoExploreR or other FCS analysis 
+packages.
+
+
+```{r, echo=T, out.width="100%", fig.dim=c(10, 6)}
+fit <- fit.peaks(trace=sample.a[log10(sample.a) > 4 & log10(sample.a) < 5.6],
+                 peak.0.lower.bound=gen0.cutoff,
+                 mode="MLE")
+```
+
+#### Option 2
+Allow more peaks to be fit in the model by relaxing initial estimation
+thresholds. This can be achieved by tweaking peak.thresh.enrich,
+peak.thresh.summit and peak.max. Some amount of gating may still be needed 
+to avoid this issue as MLE is quite sensitive to optimizing the likelihood so
+the tails are included.
+
+In least squares mode this issue is avoided by trimming the left tail to zero 
+prior to optimization for values outside the model range. This is effectively
+equivalent to setting a strict gate on the model range.
+
+
+```{r, echo=T, out.width="100%", fig.dim=c(10, 6)}
+fit <- fit.peaks(trace=sample.a[log10(sample.a) > 3 & log10(sample.a) < 5.6],
+                 peak.0.lower.bound=gen0.cutoff,
+                 mode="MLE",
+                 peak.thresh.enrich=0,
+                 peak.thresh.summit=0)
+```
+
+If we now run the same parameters using NLS we will see we will find a similar
+model.
+
+
+```{r, echo=T, out.width="100%", fig.dim=c(10, 6)}
+fit <- fit.peaks(trace=sample.a,
+                 peak.0.lower.bound=gen0.cutoff,
+                 mode="LS",
+                 peak.thresh.enrich=0,
+                 peak.thresh.summit=0,
+                 plot.optim=F)
+```
+
+We can control the trimming of the tail using the option opt.trim.left.tail
+In this case it makes little difference due to the way parameter constraints
+are setup. But this can be sample specific!
+
+In this example, we forcibly misspecify the model to show how trimming the left 
+tail outside of the initial estimates influences the optimizer.
+
+```{r, echo=T, out.width="100%", fig.dim=c(10, 6)}
+par(mfrow=c(2,1))
+fit <- fit.peaks(trace=sample.a,
+                 peak.0.lower.bound=gen0.cutoff,
+                 mode="LS",
+                 peak.thresh.enrich=0,
+                 peak.thresh.summit=0,
+                 peak.max=2,
+                 opt.trim.left.tail=F,
+                 plot.optim=F)
+
+fit <- fit.peaks(trace=sample.a,
+                 peak.0.lower.bound=gen0.cutoff,
+                 mode="LS",
+                 peak.thresh.enrich=0,
+                 peak.thresh.summit=0,
+                 peak.max=2,
+                 opt.trim.left.tail=T,
+                 plot.optim=F)
+par(mfrow=c(1,1))
+```
+
+
+## Example one
+
+
+Not yet implemented
+

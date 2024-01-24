@@ -301,6 +301,8 @@ find.initial.peaks <- function(cur.hist, y, peak.0.lower.bound,peak.thresh.enric
 
   }
 
+  peak.stats[is.na(peak.stats)] <- 0
+
   # Add gen 0 to the output table
   peak.stats            <- rbind(c(peak0.mean,
                                    peak0.summit,
@@ -390,98 +392,6 @@ find.initial.peaks <- function(cur.hist, y, peak.0.lower.bound,peak.thresh.enric
   #####
 
   return(peak.stats)
-}
-
-#-------------------------------------------------------------------------------
-#' Plot optimization of parameters
-#'
-#'
-opt.plot.params <- function(x, opt.env) {
-
-  n     <- ncol(opt.env[["means"]])
-  cols  <- palette.colors(n = n, recycle = T)
-
-  #--------------------------------------------------------------------------
-  # Score
-  plot(1:length(opt.env[["score"]]),
-       opt.env[["score"]],
-       xlab="Iteration",
-       ylab="NLL / RSS",
-       pch=20,
-       col="grey",
-       bty="n",
-       main="Neg. Log Lik. / Res. Sum of Sqr.",
-       type="l")
-
-  #--------------------------------------------------------------------------
-  n.iter <- nrow(opt.env[["means"]])
-  # Mean
-  plot(1:n.iter,
-       opt.env[["means"]][,1],
-       xlab="Iteration",
-       ylab="Mean",
-       pch=20,
-       col=cols[1],
-       bty="n",
-       main="Optim - mean",
-       type="l",
-       ylim=c(min(x), max(x)))
-
-  for (i in 2:ncol(opt.env[["means"]])) {
-    lines(1:n.iter,
-          opt.env[["means"]][,i],
-          col=cols[i])
-  }
-
-  legend("right",
-         legend=paste0("Gen", 0:(n-1)),
-         fill=cols,
-         bty="n")
-  #--------------------------------------------------------------------------
-  # SD
-  plot(1:n.iter,
-       opt.env[["sd"]][,1],
-       xlab="Iteration",
-       ylab="Peak SD",
-       pch=20,
-       col=cols[i],
-       bty="n",
-       main="Optim - SD",
-       type="l")
-
-  for (i in 2:ncol(opt.env[["sd"]])) {
-    lines(1:n.iter,
-          opt.env[["sd"]][,i],
-          col=cols[i])
-  }
-
-  legend("right",
-         legend=paste0("Gen", 0:(n-1)),
-         fill=cols,
-         bty="n")
-  #--------------------------------------------------------------------------
-  # Summit
-  plot(1:n.iter,
-       opt.env[["summits"]][,1],
-       xlab="Iteration",
-       ylab="Summit",
-       pch=20,
-       col=cols[1],
-       bty="n",
-       main="Optim - summit",
-       type="l",
-       ylim=c(min(opt.env[["summits"]]), max(opt.env[["summits"]])))
-
-  for (i in 2:ncol(opt.env[["summits"]])) {
-    lines(1:n.iter,
-          opt.env[["summits"]][,i],
-          col=cols[i])
-  }
-
-  legend("right",
-         legend=paste0("Gen", 0:(n-1)),
-         fill=cols,
-         bty="n")
 }
 
 #-------------------------------------------------------------------------------
@@ -667,7 +577,7 @@ opt.prolif.model.ls <- function(x, y, starts, upper, lower, fixed, peak.stats, p
 #' To ignore this, set to Inf. This setting avoids the optimizer putting peaks
 #' in the left tail that sometimes might be present.
 #'
-#' @param x raw FACS intensities
+#' @param trace raw FACS intensities
 #' @param peak.0.lower.bound the value on log10 scale where the first valley is
 #' @param peak.thresh.enrich fold change over valley to call peak in initial estimation (default 1)
 #' @param peak.thresh.summit minimum height of a peak in percentage of total heights (default 0.05)
@@ -675,11 +585,15 @@ opt.prolif.model.ls <- function(x, y, starts, upper, lower, fixed, peak.stats, p
 #' @param bins number of bins for fitting (default 250)
 #' @param smoothing.window number of values up and downstream for the NN smoother (default 2)
 #' @param plot should results be plotted
+#' @param plot.optim should optimization plot be plotted
+#' @param plot.final should final plot of optimized fit be plotted
 #' @param plot.main title for the plot
-#' @param opt.peak.pos.dev limits the range where peak positions can be. See @details
-#' @param opt.trim.left.tail Should values that fall outside the model range bet set to zero @details
+#' @param opt.peak.pos.dev limits the range in x where peak positions can be optimized within
+#' @param opt.trim.left.tail Should values that fall outside the model range bet set to zero
+#' @param mode either LS for least squares or 'MLE' for maximum likelihood estimation based optimizer. See @details
+#' @param full.out If true output a list with everything needed to easily re-make plots. Usefull if you want to regen plots in ggplot for instance.
 
-#' @returns A data frame with peak statistics
+#' @returns A data frame with peak statistics or list of objects if full.out=T
 #'
 #' @examples
 #'
@@ -695,20 +609,47 @@ opt.prolif.model.ls <- function(x, y, starts, upper, lower, fixed, peak.stats, p
 #' y <- c((y/8)[1:500], y/4, y/2, y[1:500])
 #'
 #' peaks <- fit.peaks(y, peak.0.lower.bound=9.9, mode="MLE")
+#'
+#' @details
+#'
+#' # mode
+#' The package offers two optimization schemes:
+#'
+#' Non linear least squares (LS) with mode=“LS”. Here the data is first binned
+#' and smoothed, then parameters are optimized over the smoothed trace using non
+#' linear least squares. This method is quick and robust, but relies on binning
+#' and some other data processing so is technically less accurate.
+#'
+#' Maximum likelihood estimation (MLE) based with mode=“MLE”. This mode is a
+#' little more proper in that it does not rely on binning or other data tricks
+#' to optimize, and takes the full data set to optimize on directly. Initial
+#' parameter estimation is still done on a binned smoothed version of the data,
+#' but optimization is not.
+#'
+#' In practice I have found very little difference between these two when the
+#' setup is performed correctly.
+#'
 #' @export
 fit.peaks  <- function(trace,
                       peak.0.lower.bound,
                       bins=250,
                       smoothing.window=2,
+                      plot.optim=T,
+                      plot.final=T,
                       plot=T,
                       plot.main = "Proliferation model",
                       opt.peak.pos.dev=NULL,
                       opt.trim.left.tail=T,
                       mode="LS",
+                      full.out=F,
                       ...) {
 
   # Plotting
-  if (plot) {par(mfrow=c(2,3), mar=c(5,5,5,1))}
+  if (!plot) {
+    plot.optim <- F
+    plot.final <- F
+  }
+  if (plot.optim) {par(mfrow=c(2,3), mar=c(5,5,5,1))}
 
   # Construct histogram
   cur.hist <- hist(log10(trace), breaks=bins, plot=F)
@@ -716,7 +657,7 @@ fit.peaks  <- function(trace,
   # Nearest neighbor smoother
   y.smth     <- nn.smoother(cur.hist$counts, window=smoothing.window)
 
-  peak.stats <- find.initial.peaks(cur.hist, y.smth, peak.0.lower.bound, plot = plot, ...)
+  peak.stats <- find.initial.peaks(cur.hist, y.smth, peak.0.lower.bound, plot = plot.optim,...)
 
   # If just generation zero is left, do not proceed to optimization
   if (nrow(peak.stats)==1) {
@@ -799,9 +740,8 @@ fit.peaks  <- function(trace,
                                      lower=lower,
                                      fixed=fixed,
                                      peak.stats=peak.stats,
-                                     plot=plot,
+                                     plot=plot.optim,
                                      opt.env=opt.env)
-
 
     # total events captured by the model
     #total.events <- sum(y[x > peak.stats[nrow(peak.stats),"opt_mean"] - 3*(peak.stats[nrow(peak.stats),"opt_peak_sd"]) ])
@@ -826,7 +766,7 @@ fit.peaks  <- function(trace,
                                       lower=lower,
                                       fixed=fixed,
                                       peak.stats=peak.stats,
-                                      plot=plot,
+                                      plot=plot.optim,
                                       opt.env=opt.env)
 
     total.events <- length(trace)
@@ -843,30 +783,18 @@ fit.peaks  <- function(trace,
     stop(simpleError("No valid mode provided, must be LS or MLE."))
   }
 
-  mtext(plot.main, side = 3, line = -2, outer = TRUE)
+  if (plot.optim) {
+    mtext(plot.main, side = 3, line = -2, outer = TRUE)
+  }
   par(mfrow=c(1,1))
 
   # Clear environment with optimization results
   rm("opt.env")
 
   #-----------------------------------------------------------------------------
-  if (plot) {
-
-    ####
-    plot(x.mids, cur.hist$counts,
-         main="Optimal fit vs data",
-         xlab="Bin average log10(CTV)",
-         ylab="Count",
-         pch=20,
-         col="grey", bty="n")
-    lines(y.pred.optim ~ x.mids, lwd=2, col="red")
-
-    legend("topleft",
-           legend=c("Data", "Optimized fit"),
-           fill=c("grey", "red"),
-           bty="n")
+  if (plot.final) {
+    opt.plot.final(x.mids, cur.hist$counts, y.pred.optim)
   }
-
 
   # Add the optimized values to the table
   peak.stats$opt_mean    <- as.numeric(final.par[mean.names])
@@ -904,10 +832,15 @@ fit.peaks  <- function(trace,
   peak.stats$peak_ancestors <- tmp
 
 
-
-
-
-  return(peak.stats)
+  if (full.out) {
+    return(list(peak.stats=peak.stats,
+                hist=cur.hist,
+                x=x.mids,
+                y=y.pred.optim,
+                par=final.par))
+  } else {
+    return(peak.stats)
+  }
 }
 
 #-------------------------------------------------------------------------------
