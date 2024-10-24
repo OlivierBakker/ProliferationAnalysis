@@ -13,7 +13,11 @@ devtools::install_github("https://github.com/OlivierBakker/ProliferationAnalysis
 
 # Example
 
-The following simulates some proliferation data and fits peaks to it. For more detaills download the vingette html in the vingettes folder for it to render properly
+The following simulates some proliferation data and fits peaks to it. 
+
+Or see the vingette for more detaills: <a href="https://html-preview.github.io/?url=https://github.com/OlivierBakker/ProliferationAnalysis/blob/main/vignettes/fitting_proliferation_model.html" >Fitting a proliferation model with complex mixture</a>
+Note: download the vingette html in the vingettes folder for it to render properly
+
 ```
 library(ProliferationAnalysis)
 library(minpack.lm)
