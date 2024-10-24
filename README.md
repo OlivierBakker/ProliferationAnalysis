@@ -7,7 +7,6 @@ Depends on
 - minpack.lm https://cran.r-project.org/web/packages/minpack.lm/index.html
 
 ```
-install.packages("minpack.lm")
 devtools::install_github("https://github.com/OlivierBakker/ProliferationAnalysis/tree/main")
 ```
 
@@ -20,7 +19,6 @@ Note: download the vingette html in the vingettes folder for it to render proper
 
 ```
 library(ProliferationAnalysis)
-library(minpack.lm)
 
 # Simulate proliferation data
 y <- 10 ^ rnorm(1000, mean=10, sd=0.05)
