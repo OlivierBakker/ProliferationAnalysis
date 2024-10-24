@@ -1,11 +1,51 @@
 
 
 #-------------------------------------------------------------------------------
+#' Plot intial parameter estimates
+#'
+opt.plot.estimates <- function(cur.hist, y.smth, peak.stats, peak.0.lower.bound,peak.x.model, peak.x.mode, peak.x.upper.bound) {
+
+  plot(cur.hist$mids,
+       cur.hist$counts,
+       main="Initial peak estimates",
+       ylab="Count",
+       xlab="Bin average log10(CTV)",
+       bty="n",
+       pch=20,
+       col="grey")
+
+  lines(cur.hist$mids, y.smth, new=F, lwd=3, col="blue")
+  abline(v=peak.stats[1, 1], col="red", lwd=2)
+  abline(v=peak.0.lower.bound, col="red", lty=2)
+
+  for (i in 2:nrow(peak.stats)) {
+    abline(v=peak.stats[i, 1], lwd=2, col="grey")
+  }
+
+  if (peak.x.model & !is.null(peak.x.mode)) {
+    abline(v=peak.x.mode, col="orange", lwd=2)
+    abline(v=peak.x.upper.bound, col="orange", lty=2)
+
+    legend("topleft",
+           legend=c("Smoothed data", "Gen0", "GenX"),
+           fill=c("blue", "red", "orange"),
+           bty="n")
+  } else {
+    legend("topleft",
+           legend=c("Smoothed data", "Gen0"),
+           fill=c("blue", "red"),
+           bty="n")
+  }
+}
+
+
+#-------------------------------------------------------------------------------
 #' Plot optimization of parameters
 #'
-opt.plot.final <- function(x.mids, y, y.pred.optim) {
+opt.plot.final <- function(x.mids, y, y.pred.optim, main="Optimal fit vs data") {
+
   plot(x.mids, y,
-       main="Optimal fit vs data",
+       main=main,
        xlab="Bin average log10(CTV)",
        ylab="Count",
        pch=20,
@@ -15,6 +55,42 @@ opt.plot.final <- function(x.mids, y, y.pred.optim) {
   legend("topleft",
          legend=c("Data", "Optimized fit"),
          fill=c("grey", "red"),
+         bty="n")
+}
+
+#-------------------------------------------------------------------------------
+#' Plot optimization of parameters per peak
+#'
+opt.plot.final.pp <- function(x.mids, y, ps,  main="Optimal fit vs data") {
+
+  plot(x.mids, y,
+       main=main,
+       xlab="Bin average log10(CTV)",
+       ylab="Count",
+       pch=20,
+       col="grey", bty="n")
+  #lines(y.pred.optim ~ x.mids, lwd=2, col="red")
+
+  binwidth     <- (x.mids[2] - x.mids[1])
+
+  for (i in 1:nrow(ps)) {
+
+    # Filter individual peaks to 4sd
+    #range    <- x[(x > (ps[i,]$opt_mean - 3.5* ps[i,]$opt_peak_sd)) &  (x < (ps[i,]$opt_mean + 3.5* ps[i,]$opt_peak_sd))]
+    range <- x.mids
+    y.single <- dnorm(range,  ps[i,]$opt_mean, ps[i,]$opt_peak_sd)
+    y.single <- y.single * ps[i,]$peak_area_prop/100
+    y.single <- (y.single*binwidth) * sum(ps$peak_events)
+
+    lines(range, y.single, col="black")
+  }
+
+  dens <- exp(prolif.model.density(ps$opt_mean, ps$opt_peak_sd, ps$peak_area_prop, x.mids, log=T))
+  lines(x.mids, (dens*binwidth) *sum(ps$peak_events), col="red", lwd=2)
+
+  legend("topleft",
+         legend=c("Data", "Optimized fit", "Single peaks"),
+         fill=c("grey", "red", "black"),
          bty="n")
 }
 
@@ -41,9 +117,10 @@ opt.plot.params <- function(x, opt.env) {
 
   #--------------------------------------------------------------------------
   n.iter <- nrow(opt.env[["means"]])
+
   # Mean
   plot(1:n.iter,
-       opt.env[["means"]][,1],
+       opt.env[["means"]][,1, drop=F],
        xlab="Iteration",
        ylab="Mean",
        pch=20,
@@ -53,11 +130,14 @@ opt.plot.params <- function(x, opt.env) {
        type="l",
        ylim=c(min(x), max(x)))
 
-  for (i in 2:ncol(opt.env[["means"]])) {
-    lines(1:n.iter,
-          opt.env[["means"]][,i],
-          col=cols[i])
+  if (ncol(opt.env[["means"]]) > 1) {
+    for (i in 2:ncol(opt.env[["means"]])) {
+      lines(1:n.iter,
+            opt.env[["means"]][,i,drop=F],
+            col=cols[i])
+    }
   }
+
 
   legend("right",
          legend=paste0("Gen", 0:(n-1)),
@@ -70,16 +150,18 @@ opt.plot.params <- function(x, opt.env) {
        xlab="Iteration",
        ylab="Peak SD",
        pch=20,
-       col=cols[i],
+       col=cols[1],
        bty="n",
        main="Optim - SD",
        type="l",
        ylim=c(min(opt.env[["sd"]]), max(opt.env[["sd"]])))
 
-  for (i in 2:ncol(opt.env[["sd"]])) {
-    lines(1:n.iter,
-          opt.env[["sd"]][,i],
-          col=cols[i])
+  if (ncol(opt.env[["sd"]]) > 1) {
+    for (i in 2:ncol(opt.env[["sd"]])) {
+      lines(1:n.iter,
+            opt.env[["sd"]][,i],
+            col=cols[i])
+    }
   }
 
   legend("right",
@@ -99,10 +181,12 @@ opt.plot.params <- function(x, opt.env) {
        type="l",
        ylim=c(min(opt.env[["summits"]]), max(opt.env[["summits"]])))
 
-  for (i in 2:ncol(opt.env[["summits"]])) {
-    lines(1:n.iter,
-          opt.env[["summits"]][,i],
-          col=cols[i])
+  if (ncol(opt.env[["summits"]]) > 1) {
+    for (i in 2:ncol(opt.env[["summits"]])) {
+      lines(1:n.iter,
+            opt.env[["summits"]][,i],
+            col=cols[i])
+    }
   }
 
   legend("right",

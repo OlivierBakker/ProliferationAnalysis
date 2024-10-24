@@ -39,7 +39,7 @@ data("ctv_example")
 ```
 
 
-### Example data {.tabset}
+### Example data
 
 The package comes bundled with some example traces.
 
@@ -57,11 +57,10 @@ sample.b <- ctv[[28]]
 
 plot(density(log10(sample.b)),
      type="l")
-
 ```
 
 
-# Fitting a proliferation model to CTV traces {.tabset}
+# Fitting a proliferation model to CTV traces
 
 The first step before we run proliferation modeling is to extract the raw per-cell
 CTV (other dyes are available) intensities from the .fcs files and gate on single
@@ -73,7 +72,6 @@ to avoid debris and CTV- cells affecting the fit. Then proceed with example 1.
 2. If you have a complex cell sample where only a portion of cells have been
 stained, proceed with example 2.
 
-
 \* This package does NOT handle this part, and would refer you to the plethora of
 FACS analysis options available in R. I quite like CytoExploreR for gating.
 
@@ -83,7 +81,7 @@ FACS analysis options available in R. I quite like CytoExploreR for gating.
 
 The package offers two optimization schemes.
 
-1. Non linear least squares (LS) with mode="LS". Here the data is first binned
+1. [recommended] Non linear least squares (LS) with mode="LS". Here the data is first binned
 and smoothed, then parameters are optimized over the smoothed trace using
 non linear least squares. This method is quick and robust, but relies on binning
 and some other data processing so is technically less accurate. 
@@ -92,7 +90,9 @@ and some other data processing so is technically less accurate.
 little more proper in that it does not rely on binning or other data tricks to
 optimize, and takes the full data set to optimize on directly. Initial parameter
 estimation is still done on a binned smoothed version of the data, but 
-optimization is not.
+optimization is not. The disadvantage is it a lot slower to run, and hence I would
+not recommend it. On the todo list is to speed this up, but given the least squares
+works very well, this is not a high priority.
 
 In practice I have found very little difference between these two when the
 setup is performed correctly. Some examples below of issues you may encounter.
@@ -136,41 +136,34 @@ This can be useful to diagnose issues if you get weird looking fits.
 The final single plot shows the original trace vs the optimized model.
 
 
-### Step 3: Evaluate and diagnose issues {.tabset}
-If we run the same example again, but now using the MLE optimization procedure
-we can see something is off.
-
+### Step 3: Evaluate and diagnose issues
+Ig we now run a different sample, we can see there is an issue
 
 ```{r, echo=T, out.width="100%", fig.dim=c(10, 6)}
 # Basic fit with MLE goes wrong
-fit <- fit.peaks(trace=sample.a,
+fit <- fit.peaks(trace= ctv[[14]],
                  peak.0.lower.bound=gen0.cutoff,
-                 mode="MLE")
+                 mode="LS")
 ```
 
-In this case the left tail in the data is causing the most optimal fit to be
-a single distribution that covers the tail. This is clearly wrong and has as
-a cause that the automated peak estimates don't cover this tail. Note, this
-behavior is not limited to the MLE optimizer, it just so happens this
-particular combination of data sends the optimizer down this path and the way
-the constraints are setup in the different modes.
+In this case the left tail in the data is causing the optimizer to spread out the distribution within its constraints as much as possible.
 
-This can be solved in 3 ways:
+This is clearly wrong and has as a cause that the automated peak estimates don't cover this tail. In this case, there is also an extra little peak we are missing that does not pass the default peak thresholds, which is making the issue worse.
 
+However, we can easily solve this in a couple of ways
 
-#### Option 1
+#### Option 1: Trimming the optizier region
 Enable the "auto gating" by trimming left and right tails that fall outside of
 the initial model range. The initial peak estimates are first made on the full
 trace that is supplied. Then the values within one peak sd outside are removed
 in mode="MLE" or bins set to zero count in mode="LS". This prevents the
-optimizers from fitting to the tails. The only sacrifice here is a small loss
+optimizer from fitting to the tails. The only sacrifice here is a small loss
 in accuracy and potentially an issue if the initial parameter estimates are way
 off, so carefully check its working as intended.
 
 ```{r, echo=T, out.width="100%", fig.dim=c(10, 6)}
-fit <- fit.peaks(trace=sample.a,
+fit <- fit.peaks(trace=ctv[[14]],
                  peak.0.lower.bound=gen0.cutoff,
-                 mode="MLE",
                  opt.trim.left.tail = T,
                  opt.trim.right.tail = T)
 ```
@@ -181,14 +174,12 @@ opt.trim.right.tail and opt.trim.left.tail
 In this case it makes little difference due to the way parameter constraints
 are setup. But this can be sample specific!
 
-In this example, we forcibly misspecify the model to show how trimming the left 
-tail outside of the initial estimates influences the optimizer.
+In the following example, we first forcibly misspecify the model to show how trimming the left tail outside of the initial estimates influences the optimizer.
 
 ```{r, echo=T, out.width="100%", fig.dim=c(10, 6)}
 par(mfrow=c(2,1))
 fit <- fit.peaks(trace=sample.a,
                  peak.0.lower.bound=gen0.cutoff,
-                 mode="LS",
                  peak.thresh.enrich=0,
                  peak.thresh.summit=0,
                  peak.max=2,
@@ -197,7 +188,6 @@ fit <- fit.peaks(trace=sample.a,
 
 fit <- fit.peaks(trace=sample.a,
                  peak.0.lower.bound=gen0.cutoff,
-                 mode="LS",
                  peak.thresh.enrich=0,
                  peak.thresh.summit=0,
                  peak.max=2,
@@ -206,7 +196,7 @@ fit <- fit.peaks(trace=sample.a,
 par(mfrow=c(1,1))
 ```
 
-#### Option 2
+#### Option 2: Strictly gate the CTV+ region
 Fix the fit by strictly gating out the on the CTV- and CTV ++ tails prior
 to running.
 
@@ -220,60 +210,125 @@ easily be performed on all your samples in CytoExploreR or other FCS analysis
 packages.
 
 ```{r, echo=T, out.width="100%", fig.dim=c(10, 6)}
-fit <- fit.peaks(trace=sample.a[log10(sample.a) > 4 & log10(sample.a) < 5.6],
-                 peak.0.lower.bound=gen0.cutoff,
-                 mode="MLE")
+fit <- fit.peaks(trace=ctv[[14]][log10(ctv[[14]]) > 4 & log10(ctv[[14]]) < 5.6],
+                 peak.0.lower.bound=gen0.cutoff)
 ```
 
-#### Option 3
-Allow more peaks to be fit in the model by relaxing initial estimation
-thresholds. This can be achieved by tweaking peak.thresh.enrich,
-peak.thresh.summit and peak.max. Some amount of gating may still be needed 
-to avoid this issue as MLE is quite sensitive to optimizing the likelihood so
-the tails are included.
+#### Option 3: Tweak the initial peak calling
+You can allow more peaks to be fit in the model by relaxing initial estimation
+thresholds. This can be achieved by tweaking peak.thresh.enrich, peak.thresh.summit and peak.max. To not filter any possible peaks, set these to 0.
 
 The disadvantage here is that you might include many more peaks, increasing
 model complexity, and which are not likely to be very accurate as in lower 
 ranges the proliferation traces are less reliable.
 
 ```{r, echo=T, out.width="100%", fig.dim=c(10, 6)}
-fit <- fit.peaks(trace=sample.a,
+fit <- fit.peaks(trace=ctv[[14]],
                  peak.0.lower.bound=gen0.cutoff,
-                 mode="MLE",
                  peak.thresh.enrich=0,
                  peak.thresh.summit=0,
                  opt.trim.right.tail=T)
 ```
 
-If we now run the same parameters using NLS we will see we will find a similar
-model.
+As you can see, this produces a non-nonsensical model as well, as we have a very clear and distinct CTV- sample in this data. If we set peak.max and the the thresholds to 0 we can force only 3 peaks, or we can relax the thresholds so more peaks are considered.
+
 ```{r, echo=T, out.width="100%", fig.dim=c(10, 6)}
-fit <- fit.peaks(trace=sample.a,
+# Force a model with 3 peaks
+fit <- fit.peaks(trace=ctv[[14]],
                  peak.0.lower.bound=gen0.cutoff,
-                 mode="LS",
                  peak.thresh.enrich=0,
                  peak.thresh.summit=0,
+                 peak.max=3,
+                 plot.optim = F)
+
+# Relax the auto detect peak thresholds
+fit <- fit.peaks(trace=ctv[[14]],
+                 peak.0.lower.bound=gen0.cutoff,
+                 peak.thresh.enrich=0,
+                 peak.thresh.summit=0.01,
                  opt.trim.right.tail=T,
-                 plot.optim=F,
+                 plot.optim = F)
+```
+
+But the result is still not quite right! We note that this is generally a rare case for modeling peaks and should only occur if the sample was taken from a mixed cell culture. To fully fix this more complex sample, you can then either, supply opt.trim.left.tail=T with the fixed peak number or model the CTV- peak directly by supplying peak.x.model = T
+
+```{r, echo=T, out.width="100%", fig.dim=c(10, 6)}
+
+# Use a fixed amount of peaks
+fit <- fit.peaks(trace=ctv[[14]],
+                 peak.0.lower.bound=gen0.cutoff,
+                 peak.thresh.enrich=0,
+                 peak.thresh.summit=0.01,
+                 opt.trim.left.tail=T,
+                 opt.trim.right.tail=T,
+                 plot.optim = F)
+
+# Explictly model a ctv- generation
+fit <- fit.peaks(trace=ctv[[14]],
+                 peak.0.lower.bound=gen0.cutoff,
+                 peak.thresh.summit=0.01,
+                 peak.x.model=T,
+                 plot.optim = F)
+```
+
+If we now run the same parameters using MLE we will see we will find a similar
+model. It just might take a little while to run
+```{r, echo=T, out.width="100%", fig.dim=c(10, 6)}
+fit <- fit.peaks(trace=ctv[[14]],
+                 peak.0.lower.bound=gen0.cutoff,
+                 mode="MLE",
+                 peak.thresh.enrich=0,
+                 peak.thresh.summit=0.01,
+                 opt.trim.left.tail=T,
+                 opt.trim.right.tail=T,
+                 plot.optim=T,
 )
 ```
 
+## Example Two: Modelling an extra generation
 
-## Example Two
-
-Please read example one first before moving on to this as many of the prinicples
+Please read example one first before moving on to this as many of the principles
 are shared.
 
+We can also choose to model an additional parameter, capturing a CTV- generation.
+This additional peak is unconstrained on SD and position, which can give issues.
+I'd recommend constraining the peak to be outside the CTV- gate set manually.
+This only really is an issue when the CTV- population is very small,
+if there is a clear peak, the autodection works well.
 
 By specifying peak.x.model a special generation is added to the model which has
 its own standard deviation and position. This is free from the constraints set
-by the prolferation model. This is usefull if the trace has been done on a 
+by the proliferation model. This is usefull if the trace has been done on a 
 mixture of stained and unstained cells, which might bleed over into each other.
 
 This will yield proper estimates of cell counts in later peaks where there is
 bleedover, wheras gating will over-estimate cell counts.
-```{r}
 
+```{r, echo=T, out.width="100%", fig.dim=c(10, 6)}
+# In this case autodetection fails, as there is no clear CTV- peak, and we have not setup a constraint on where it can be
+fit <- fit.peaks(trace=sample.a,
+                 peak.0.lower.bound=gen0.cutoff,
+                 mode="LS",
+                 opt.trim.right.tail=F,
+                 peak.x.model = T,
+                 plot.optim=T
+)
+
+# With a bound on where the peak mean can be, in this case, there is just a spread, and no peak.x is explicitly modelled
+fit <- fit.peaks(trace=sample.a,
+                 peak.0.lower.bound=gen0.cutoff,
+                 mode="LS",
+                 opt.trim.right.tail=F,
+                 peak.x.model = T,
+                 peak.x.thresh.summit = 0.01,
+                 peak.x.upper.bound = 3.5,
+                 plot.optim=T,
+)
+```
+
+
+In some samples the cells may have proliferated so much that there is a bleedover between divided cells and CTV- cells, or the CTV- cells have bleedover because of autofluorecence. The package can pull this apart by assuming a gausian density of the CTV- popilation.
+```{r}
 # Fit sample accounting for bleedover 
 fit.a <- fit.peaks(trace=sample.b,
                    peak.0.lower.bound=gen0.cutoff,
@@ -300,49 +355,262 @@ get.prolif.stats(fit.b)
 
 cols  <- palette.colors(n = nrow(fit.b), recycle = T)
 
-plot(fit.a[1:7,]$peak_area_prop,
-     fit.b$peak_area_prop,
-     xlim=c(5,25),
-     ylim=c(5,25),
+plot(fit.a[1:7,]$peak_events,
+     fit.b$peak_events,
+     xlim=c(0,5000),
+     ylim=c(0,5000),
      col=cols,
      pch=20,
      cex=2,
-     xlab="Relative peak height - with peak x",
-     ylab="Relative peak height - no peak x")
+     xlab="Number of events in peak - with peak x",
+     ylab="Number of events in peak - no peak x")
 abline(a=0, b=1, lty=2)
 legend("topright",
        legend=paste0("Gen", fit.a[1:7,]$generation),
        fill=cols)
+```
+
+# Evaluate FCS express vs this data
+```{r, eval=F, echo=F}
+library(minpack.lm)
+library(readxl)
+library(flowCore)
+#source("R/proliferation_modeling_functions.r")
+#source("R/proliferation_plotting_functions.r")
+devtools::install_github("https://github.com/OlivierBakker/ProliferationAnalysis/tree/main")
+library(ProliferationAnalysis)
+source("~/Documents/tools/rscripts/plotting_functions.r")
+
+fcs.express <- as.data.frame(read_excel("~/Documents/projects/r_packages/ProliferationAnalysisTestData/p24-27_testset/fcs_express_prolif_stats.xlsx"))
+rownames(fcs.express) <- fcs.express$`Keyword: $FIL for plot #3, overlay #1`
+
+tmp <- gsub("\\.+\\d+", "", colnames(fcs.express))
+tmp <- tolower(tmp)
+tmp <- gsub(" ", "_", tmp)
+tmp[tmp=="keyword:_$fil_for_plot_#3,_overlay_#1"] <- "filename"
+tmp <- gsub("#", "num", tmp)
+tmp[12:length(tmp)] <- make.names(tmp[12:length(tmp)], unique=T)
+colnames(fcs.express) <- tmp
+
+fcs.files <- list.files("~/Documents/projects/r_packages/ProliferationAnalysisTestData/p24-27_testset/gated/", full.names = T)
+
+
+peak0.valley <- 5.23 
+out.stats    <- data.frame()
+out.names    <- c()
+
+i <- 1
+for (file in fcs.files) {
+  
+  cat("[INFO] ",round((i/length(fcs.files))*100, digits=2), "%","\r")
+  cur.fcs <- read.FCS(file)
+  x       <- cur.fcs@exprs[,"FL1-A"]
+  #plot(density(log10(x)), type="l")
+  #abline(v=5.23, lty=2)
+  
+  if (length(x) > 500) {
+    fit <- fit.peaks(x,
+                   peak0.valley,
+                   mode="LS",
+                   plot=F)
+    stats <- get.prolif.stats(fit)
+    
+    out.stats <- rbind(out.stats, stats)
+    out.names <- c(out.names, basename(file))
+  }
+
+  i <- i+1
+}
+
+rownames(out.stats) <- out.names
+colnames(out.stats) <- names(stats)
+
+# Plot of counts
+tx <- as.numeric(fcs.express[basename(file), grep("num_of_cells", colnames(fcs.express))])
+ty <- fit$peak_events
+p1 <- xy.plot(tx[1:length(ty)], 
+        ty,
+        fixed=T,
+        xlab="Number of cells per peak FCS express",
+        ylab="Number of cells per peak R",
+        size=4)
+theme.plain(p1)
+
+
+ol <- intersect(rownames(fcs.express), rownames(out.stats))
+
+p1 <- xy.plot(fcs.express[ol,]$division_index,
+        out.stats[ol,]$division_index,
+        xlab="FCS express division index",
+        ylab="R division index",
+        fixed=T)
+
+
+theme.plain(p1)
+
+p1 <- xy.plot(fcs.express[ol,]$proliferation_index,
+        out.stats[ol,]$proliferation_index,
+        xlab="FCS express proliferation index",
+        ylab="R proliferation index",
+        fixed=T)
+
+
+theme.plain(p1)
 
 ```
 
 
 
-
 ```{r, eval=F, echo=F}
+
+# Debug
+
+library(ProliferationAnalysis)
+source("R/proliferation_modeling_functions.r")
+source("R/proliferation_plotting_functions.r")
+
+# Simulate proliferation data #2
+y <- 10 ^ rnorm(1000, mean=10, sd=0.05)
+y <- c((y/8)[1:500], y/4, y/2, y[1:500])
+
+peaks <- fit.peaks(y, peak.0.lower.bound=9.9, mode="LS", full.out=T)
+
+
+dens <- prolif.model.density(peaks$peak.stats$opt_mean,
+                     peaks$peak.stats$opt_peak_sd,
+                     peaks$peak.stats$opt_summit,
+                     peaks$x,
+                     log=T)
+
+nll <- prolif.model.nll(peaks$peak.stats$opt_mean,
+                     peaks$peak.stats$opt_peak_sd,
+                     peaks$peak.stats$opt_summit,
+                     peaks$x,
+                     log=T)
+
+
+plot(peaks$x, exp(dens))
+
+peaks <- fit.peaks(y, peak.0.lower.bound=9.9, mode="MLE", full.out=T, verbose=T)
+
+
+
+
 # Development area
 library(ProliferationAnalysis)
 data("ctv_example")
-
-
-
+source("R/proliferation_modeling_functions.r")
+source("R/proliferation_plotting_functions.r")
+library(minpack.lm)
+library(LaplacesDemon)
 sample.b <- ctv[[28]]
 sample.b <- ctv[[36]]
+
+
+sample.b <- ctv[[10]]
+sample.b <- sample.b[log10(sample.b)>2]
 gen0.cutoff <- 5.3
 
-fit <- fit.peaks(trace=sample.b,
+
+sample <- sample.int(length(sample.b), 2000)
+system.time({
+fit2 <- fit.peaks(trace=sample.b[sample],
                  peak.0.lower.bound=gen0.cutoff,
-                 mode="LS",
+                 mode="MLE",
                  opt.trim.left.tail = F,
                  opt.trim.right.tail = T,
                  peak.x.model = T,
-                 peak.thresh.enrich=1,
-                 peak.thresh.summit=0
-                 )
+                 peak.x.upper.bound = 3.8,
+                 peak.thresh.enrich=0,
+                 peak.thresh.summit=0,
+                 peak.max=10,
+                 full.out=T,
+                 verbose=F,
+                 log=F,
+                 bins=1000)
+})
 
 
+yy <- prolif.model.density(fit$peak.stats$est_mean,
+                 fit$peak.stats$est_peak_sd,
+                 fit$peak.stats$est_summit_percentage,
+                 fit$x,
+                 log=T,
+                 verbose=T)
+
+
+
+
+binwidth      <- fit$x[2] -fit$x[1]
+total.events  <- sum(fit$y)
+
+library(mixtools)
+
+tmp <- normalmixEM(log10(sample.b),
+                   lambda=fit$peak.stats$est_summit_percentage,
+                   mu=fit$peak.stats$est_mean,
+                   sigma=fit$peak.stats$est_peak_sd,
+                   mean.constr=fit$peak.stats$est_mean,
+                   sd.constr=c(rep("a", nrow(fit$peak.stats)-1), NA))
+
+yy <- prolif.model.density(tmp$mu,
+                 tmp$sigma,
+                 tmp$lambda,
+                 fit$x,
+                 log=F,
+                 verbose=T)
+
+yy.plot       <- (yy*binwidth) * total.events
+
+plot(fit$x, fit$hist$counts, pch=20, col="grey")
+lines(fit$x, yy.plot, col="blue")
+
+
+
+
+yy <- prolif.model.density(fit.mle$peak.stats$opt_mean,
+                 fit.mle$peak.stats$opt_peak_sd,
+                 fit.mle$peak.stats$peak_area,
+                 fit.mle$x,
+                 log=F,
+                 verbose=T)
+
+yy.plot       <- (yy*binwidth) * total.events
+
+plot(fit$x, fit$hist$counts, pch=20, col="grey")
+lines(fit$x, yy.plot, col="blue")
+
+yy <- prolif.model(fit.mle$peak.stats$opt_mean,
+                 fit.mle$peak.stats$opt_peak_sd,
+                 fit.mle$peak.stats$opt_summit / fit.mle$peak.stats$opt_peak_sd,
+                 fit.mle$x)
+yy.plot       <- (yy*binwidth/2) * total.events
+
+
+plot(fit$x, fit$hist$counts, pch=20, col="grey")
+lines(x, yy.plot, col="blue")
+#-----------------------------------------------------
+
+plot(fit$peak.stats$peak_area_prop, fit.mle$peak.stats$peak_area_prop)
+abline(a=0, b=1)
+
+plot(fit$peak.stats$peak_events, fit.mle$peak.stats$peak_events)
+abline(a=0, b=1)
+
+
+get.prolif.stats(fit$peak.stats[1:(nrow(fit$peak.stats)-1),])
+get.prolif.stats(fit.mle$peak.stats[1:(nrow(fit$peak.stats)-1),])
+
+#-----------------------------------------------------
+# Development area
+library(ProliferationAnalysis)
+data("ctv_example")
 source("R/proliferation_modeling_functions.r")
 source("R/proliferation_plotting_functions.r")
+
+sample.b <- ctv[[28]]
+sample.b <- ctv[[10]]
+gen0.cutoff <- 5.3
 trace               <- sample.b
 peak.0.lower.bound  <- 5.3
 bins                <- 250
@@ -352,19 +620,22 @@ plot.final          <- T
 plot                <- T
 plot.main           <- "Proliferation model"
 opt.peak.pos.dev    <- NULL
-opt.trim.left.tail  <- T
+opt.trim.left.tail  <- F
+opt.trim.right.tail <- T
 mode                <- "LS"
 full.out            <- F
+verbose             <- F
 
 
 peak.x.model             <- T
 peak.x.upper.bound       <- 4  # Optional hard limit for peak x
-peak.x.summit.cutoff     <- 0.05 # Peak summit must be at least 5% of the data mode
-peak.x.summit.enrichment <- 1.2  # threshold for stopping
+peak.x.thresh.summit     <- 0.05 # Peak summit must be at least 5% of the data mode
+peak.x.thresh.enrich     <- 1.2  # threshold for stopping
+
 
 peak.x.mode <- find.peak.x.approx.mode(log10(sample.b),
-                                       peak.x.summit.cutoff=peak.x.summit.cutoff,
-                                       peak.x.summit.enrichment=peak.x.summit.enrichment,
+                                       peak.x.thresh.summit=peak.x.thresh.summit,
+                                       peak.x.thresh.enrich=peak.x.thresh.enrich,
                                        peak.x.upper.bound=peak.x.upper.bound)
 
 plot(density(log10(sample.b)), type="l")

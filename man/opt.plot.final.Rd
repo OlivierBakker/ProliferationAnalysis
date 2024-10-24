@@ -4,7 +4,7 @@
 \alias{opt.plot.final}
 \title{Plot optimization of parameters}
 \usage{
-opt.plot.final(x.mids, y, y.pred.optim)
+opt.plot.final(x.mids, y, y.pred.optim, main = "Optimal fit vs data")
 }
 \description{
 Plot optimization of parameters

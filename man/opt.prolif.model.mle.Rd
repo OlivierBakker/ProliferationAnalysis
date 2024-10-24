@@ -13,7 +13,8 @@ opt.prolif.model.mle(
   peak.stats,
   plot = F,
   opt.env = NULL,
-  verbose = F
+  verbose = F,
+  log = T
 )
 }
 \description{

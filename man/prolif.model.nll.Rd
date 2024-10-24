@@ -4,7 +4,16 @@
 \alias{prolif.model.nll}
 \title{Negative log likelihood of mixture distribution of Gaussian}
 \usage{
-prolif.model.nll(means, sd, summits, x, verbose = F)
+prolif.model.nll(
+  means,
+  sd,
+  summits,
+  x,
+  verbose = F,
+  log = T,
+  invert = F,
+  opt.env = NULL
+)
 }
 \description{
 Negative log likelihood of mixture distribution of Gaussian

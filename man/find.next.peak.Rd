@@ -2,12 +2,12 @@
 % Please edit documentation in R/proliferation_modeling_functions.r
 \name{find.next.peak}
 \alias{find.next.peak}
-\title{Find the mode of the next peak using the previous peak and the average peak
-distance}
+\title{Find the next peak in a trace}
 \usage{
-find.next.peak(x, y, prev.peak, peak.dist)
+find.next.peak(x, y, prev.peak, peak.dist, window.scaling.factors = c(1, 1))
 }
 \description{
 Find the mode of the next peak using the previous peak and the average peak
-distance
+distance. The window can be asymmetrically scaled using the scaling factors.
+This is done as the smaller the peaks get, the closer together they tend to be.
 }

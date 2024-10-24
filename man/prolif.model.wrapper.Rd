@@ -2,8 +2,7 @@
 % Please edit documentation in R/proliferation_modeling_functions.r
 \name{prolif.model.wrapper}
 \alias{prolif.model.wrapper}
-\title{Wrapper that returns a gaussian proliferation model.
-Takes a vector of paremeters par, number of peaks, and data X}
+\title{Wrapper that returns a gaussian proliferation model.}
 \usage{
 prolif.model.wrapper(
   par,
@@ -12,10 +11,12 @@ prolif.model.wrapper(
   fixed = NULL,
   type = "prolif_model",
   verbose = F,
-  opt.env = NULL
+  opt.env = NULL,
+  invert = F,
+  names = NULL,
+  log = T
 )
 }
 \description{
-Wrapper that returns a gaussian proliferation model.
 Takes a vector of paremeters par, number of peaks, and data X
 }

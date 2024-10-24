@@ -4,7 +4,15 @@
 \alias{prolif.model.density}
 \title{Density of mixture distribution of Gaussian}
 \usage{
-prolif.model.density(means, sd, summits, x, verbose = F)
+prolif.model.density(
+  means,
+  sd,
+  summits,
+  x,
+  verbose = F,
+  log = F,
+  opt.env = NULL
+)
 }
 \description{
 Density of mixture distribution of Gaussian

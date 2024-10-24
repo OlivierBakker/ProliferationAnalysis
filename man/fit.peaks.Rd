@@ -14,14 +14,19 @@ fit.peaks(
   plot = T,
   plot.main = "Proliferation model",
   opt.peak.pos.dev = NULL,
+  window.scaling.factors = c(1, 1),
   opt.trim.left.tail = F,
   opt.trim.right.tail = F,
   mode = "LS",
   full.out = F,
   peak.x.model = F,
   peak.x.upper.bound = NULL,
+  peak.x.position = NULL,
+  peak.x.fixed = F,
   peak.x.thresh.summit = 0.05,
-  peak.x.thresh.enrich = 1.1,
+  peak.x.thresh.enrich = 1.2,
+  verbose = F,
+  log = T,
   ...
 )
 }

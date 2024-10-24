@@ -11,7 +11,8 @@ find.initial.peaks(
   peak.thresh.enrich = 1,
   peak.thresh.summit = 0.05,
   peak.max = 12,
-  plot = F
+  plot = F,
+  window.scaling.factors = c(1, 1)
 )
 }
 \arguments{
