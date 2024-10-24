@@ -573,7 +573,7 @@ opt.prolif.model.ls <- function(x, y, starts, upper, lower, fixed, peak.stats, p
 
   # Find optimal model parameters using Levenberg–Marquardt algo
   # This algo tries to find the minimal least squares solution
-  res <- nls.lm(
+  res <- minpack.lm::nls.lm(
     par = starts,
     fn = prolif.resid,
     y = y,
@@ -583,7 +583,7 @@ opt.prolif.model.ls <- function(x, y, starts, upper, lower, fixed, peak.stats, p
     upper=upper,
     lower=lower,
     opt.env=opt.env,
-    control = nls.lm.control(
+    control = minpack.lm::nls.lm.control(
       nprint = F,
       maxiter = 1024,
       factor = 0.01,
