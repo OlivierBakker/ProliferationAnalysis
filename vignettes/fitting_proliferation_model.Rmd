@@ -140,7 +140,7 @@ The final single plot shows the original trace vs the optimized model.
 If we now run a different sample, we can see there is an issue
 
 ```{r, echo=T, out.width="100%", fig.dim=c(10, 6)}
-# Basic fit with MLE goes wrong
+# Basic fit with default parameters goes wrong
 fit <- fit.peaks(trace= ctv[[14]],
                  peak.0.lower.bound=gen0.cutoff,
                  mode="LS")
