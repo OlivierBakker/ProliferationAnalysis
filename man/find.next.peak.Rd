@@ -4,7 +4,13 @@
 \alias{find.next.peak}
 \title{Find the next peak in a trace}
 \usage{
-find.next.peak(x, y, prev.peak, peak.dist, window.scaling.factors = c(1, 1))
+find.next.peak(
+  x,
+  y,
+  prev.peak,
+  peak.dist,
+  window.scaling.factors = c(0.25, 0.25)
+)
 }
 \description{
 Find the mode of the next peak using the previous peak and the average peak

@@ -137,7 +137,7 @@ The final single plot shows the original trace vs the optimized model.
 
 
 ### Step 3: Evaluate and diagnose issues
-Ig we now run a different sample, we can see there is an issue
+If we now run a different sample, we can see there is an issue
 
 ```{r, echo=T, out.width="100%", fig.dim=c(10, 6)}
 # Basic fit with MLE goes wrong

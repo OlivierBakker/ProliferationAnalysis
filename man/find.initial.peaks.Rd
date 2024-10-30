@@ -12,7 +12,7 @@ find.initial.peaks(
   peak.thresh.summit = 0.05,
   peak.max = 12,
   plot = F,
-  window.scaling.factors = c(1, 1)
+  window.scaling.factors = c(0.25, 0.25)
 )
 }
 \arguments{
@@ -26,6 +26,8 @@ find.initial.peaks(
 
 \item{plot}{should plot be generated}
 
+\item{window.scaling.factors}{Scaling factors for peak differences. See details (default c(0.25, 0.25))}
+
 \item{cur.hist}{histogram object}
 }
 \value{
@@ -33,4 +35,20 @@ data frame with initial peak estimates
 }
 \description{
 Estimate initial parameters for proliferation model
+}
+\details{
+`window.scaling.factors`
+window.scaling.factors control the size of the window left and right around the next peak position
+to find the mode of the next peak. The smaller this value is, the closer to the half intensity the
+peak estimates will be.
+
+I.e. if the estimated distance between peaks is 0.5 and the scaling
+factors are c(0.25, 0.5) and the current peak is 1.5 the next peak mode will be estimates as:
+lower <- 0.5 * 0.25
+upper <- 0.5 * 0.5
+
+# Where should the next peak be based on half it's intensity
+est.peak.pos <- log10(10^1.5/2)
+
+Then find the max value in the window est.peak.pos-lower, est.peak.pos+upper
 }

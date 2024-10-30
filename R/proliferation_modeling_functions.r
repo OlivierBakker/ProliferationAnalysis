@@ -98,19 +98,19 @@ nearest.index <- function(x, value) {
 #' Find the mode of the next peak using the previous peak and the average peak
 #' distance. The window can be asymmetrically scaled using the scaling factors.
 #' This is done as the smaller the peaks get, the closer together they tend to be.
-find.next.peak <- function(x, y, prev.peak, peak.dist, window.scaling.factors=c(1, 1)) {
+find.next.peak <- function(x, y, prev.peak, peak.dist, window.scaling.factors=c(0.25, 0.25)) {
 
-  est.window      <- peak.dist/2
+  #est.window      <- peak.dist/2
   est.curpeak     <- log10((10^prev.peak)/2)
 
-  low  <- est.curpeak - (est.window * window.scaling.factors[1])
-  high <- est.curpeak + (est.window * window.scaling.factors[2])
+  low  <- est.curpeak - (peak.dist * window.scaling.factors[1])
+  high <- est.curpeak + (peak.dist * window.scaling.factors[2])
 
   curpeak.mean    <- find.local.max(x, y, low, high)
   curpeak.summit  <- y[nearest.index(x, curpeak.mean)]
 
   # calculate enrichment
-  fold.change  <- find.enrichment(x, y, curpeak.mean, est.window)
+  fold.change  <- find.enrichment(x, y, curpeak.mean, peak.dist/2)
 
   return(c(curpeak.mean, curpeak.summit, fold.change))
 }
@@ -384,10 +384,27 @@ prolif.resid <- function(par, n.peaks, x, y, fixed=NULL, opt.env=NULL) {
 #' @param peak.thresh.summit minimum height of a peak in percentage of total heights (default 0.05)
 #' @param peak.max the maximum number of peaks to search for (default 12)
 #' @param plot should plot be generated
+#' @param window.scaling.factors Scaling factors for peak differences. See details (default c(0.25, 0.25))
+#'
+#' @details
+#' `window.scaling.factors`
+#' window.scaling.factors control the size of the window left and right around the next peak position
+#' to find the mode of the next peak. The smaller this value is, the closer to the half intensity the
+#' peak estimates will be.
+#'
+#' I.e. if the estimated distance between peaks is 0.5 and the scaling
+#' factors are c(0.25, 0.5) and the current peak is 1.5 the next peak mode will be estimates as:
+#' lower <- 0.5 * 0.25
+#' upper <- 0.5 * 0.5
+#'
+#' # Where should the next peak be based on half it's intensity
+#' est.peak.pos <- log10(10^1.5/2)
+#'
+#' Then find the max value in the window est.peak.pos-lower, est.peak.pos+upper
 #'
 #' @returns data frame with initial peak estimates
 
-find.initial.peaks <- function(x, y, peak.0.lower.bound, peak.thresh.enrich=1, peak.thresh.summit=0.05, peak.max=12, plot=F, window.scaling.factors=c(1,1)) {
+find.initial.peaks <- function(x, y, peak.0.lower.bound, peak.thresh.enrich=1, peak.thresh.summit=0.05, peak.max=12, plot=F, window.scaling.factors=c(0.25,0.25)) {
   peak0.mean       <- find.local.max(x, y, peak.0.lower.bound, max(x))
 
   if (is.na(peak0.mean)) {
@@ -640,47 +657,92 @@ opt.prolif.model.ls <- function(x, y, starts, upper, lower, fixed, peak.stats, p
 #' Fit a proliferation model using least squares or maximum likelihood
 #'
 #' Fit peaks on a CTV or CFSE or other tracking dye trace using a binned
-#' or maximum liklihood approach.
-#' The trace should be raw per event data from the FCS file on the CTV+
-#' population.
+#' or maximum likelihood approach. The trace should be raw per event data from
+#' the FCS file on the CTV+ population.
+#'
+#' @param trace raw FACS intensities
+#' @param peak.0.lower.bound the value on log10 scale where the first valley is
+#' @param peak.thresh.enrich fold change over valley to call peak in initial
+#' estimation (default 1)
+#' @param peak.thresh.summit minimum height of a peak in percentage of total
+#' heights (default 0.05)
+#' @param peak.max the maximum number of peaks to search for (default 12)
+#' @param bins number of bins for fitting (default 250)
+#' @param smoothing.window number of values up and downstream for the NN
+#' smoother (default 2)
+#' @param window.scaling.factors Controls the window in which initial peaks are found. Vector of length 2
+#' @param plot should results be plotted. Overrides plot.optim & plot.final
+#' @param plot.optim should optimization plots be plotted
+#' @param plot.final should final plot of optimized fit be plotted
+#' @param plot.main title for the plot
+#' @param opt.peak.pos.dev limits the range in x where peak positions can be
+#' optimized within. See @details
+#' @param opt.trim.left.tail  Should values that fall outside the initial model
+#' range be removed from optimization. See @details
+#' @param opt.trim.right.tail Should values that fall outside the initial model
+#' range be removed from optimization. See @details
+#' @param mode either LS for least squares or 'MLE' for maximum likelihood
+#' estimation based optimizer. See @details
+#' @param full.out If true output a list with everything needed to easily
+#' re-make plots. Useful if you want to regen plots in ggplot for instance.
+#' @param peak.thresh.enrich Fold change enrichment of a peak over its valleys
+#' @param peak.thresh.summit Relative height of a peak with respect to trace mode
+#' @param peak.x.model Should an extra peak be fit that models a trace negative
+#' population of cells. See @details
+#' @param peak.x.upper.bound If peak.x.model=T, specify the hard limit for
+#' finding the mode of peak x. Set to NULL for no limit. (default NULL)
+#' @param peak.x.thresh.summit Controls the automated detection of the mode of
+#' peak x. Only peaks with a % of the total data mode of this are considered.
+#' Should be valued between 0-1. (default 0.05)
+#' @param peak.x.thresh.enrich Similar to peak.thresh.enrich but for peak x.
+#' (default = 1.1)
+#' @param window.scaling.factors Scaling factors for peak finding See details (default c(0.25, 0.25))
 #'
 #' @details
-#' As a proliferation model, a guassian mixture distribution is fit.
-#' Initial parameters (number of peaks, peak means, peak summits) are estimated
-#' using a simple approach where first the generation zero peak is estimated
-#' based on 'peak.0.lower.bound' on smoothed data. The bins are smoothed using a
-#' nearest neighbour smoother in the window provided.
+#' This fits a proliferation model on a trace of raw FACS intensities.
+#' The fitting happens in two stages:
+#' 1. Initial estimation of number of peaks and their positions
+#' 2. Optimization of the model to find final values
 #'
-#' Peaks are only called if they exceed peak.thresh.enrich, the relative
-#' enrichment between the valley's either side of the peak and the peak summit.
-#' Peaks must also be adjacent. So if peak 2 does not pass peak.thresh.enrich
+#' Initial estimation is done based on thresholds. First the 0 peak
+#' is estimated by finding the mode of the data > peak.0.lower.bound.
+#'
+#' The next peak is then found by finding the mode, at half of the intenstiy
+#' of the mode of peak 0. The range where the mode is looked for can be
+#' controlled by tweaking `window.scaling.factors`.
+#'
+#' Peaks are only called if they exceed `peak.thresh.enrich`, the relative
+#' enrichment between the valley's either side of the peak and the peak summit
+#' and `peak.thresh.summit`, the height of the peak with respect to the mode of
+#' the whole trace. So this takes a value between 0-1 describing a percentage of
+#' the mode the peak must have. To fit all possible peaks, set both of these to 0
+#'
+#' Peaks must also be adjacent. So if peak 2 does not pass `peak.thresh.enrich`
 #' but peak 3 does, only 2 peaks are fit. This is done to avoid fitting many
 #' peaks in the marginal count range.
 #'
-#' Using the gen0 peak the subsequent peak position is estimated, after which
-#' the summit is found and the peak mean updated to the local summit. This is
-#' repeated using each subsequent peak.
-#'
-#' After estimating starting values, a gaussian mixture distribution is fit to
-#' the trace (a sum of the PDF of individuals gaussians). The starting values
+#' After estimating starting values, a Gaussian mixture distribution is fit to
+#' the trace (a sum of the PDF of individuals Gaussian). The starting values
 #' for the peak standard deviations are estimated from the trace in the bound
 #' of peak0. These values are input into the Levenberg-Marquardt algo to
-#' optimise with respect to the resdiual sum of squares between the model
-#' and the smoothed trace.
+#' optimize with respect to the residual sum of squares between the model
+#' and the smoothed trace in mode 'LS' or using MLE and R optim() when in mode
+#' 'MLE'.
 #'
-#' # opt.peak.pos.dev
+#' # `opt.peak.pos.dev`
 #' opt.peak.pos.dev controls the range peaks are allowed to vary in position
 #' during optimization. Defaults to +- half the estimated peak distance (NULL).
 #' To ignore this, set to Inf. This setting avoids the optimizer putting peaks
-#' in the left tail that sometimes might be present or seperating peaks into
-#' nonsensical distances.
+#' in the left tail that sometimes might be present or separating peaks into
+#' nonsensical distances. To contol the allowable range of initial peak
+#' estimates see `window.scaling.factors`
 #'
-#' # opt.trim.left.tail / opt.trim.right.tail
+#' # `opt.trim.left.tail` / `opt.trim.right.tail`
 #' Removes values (MLE) or sets count to zero (LS) of values that fall outside
 #' 1sd of the initial model space. This essentially functions as an auto gate
 #' after identifying initial peak positions.
 #'
-#' # mode
+#' # `mode`
 #' The package offers two optimization schemes:
 #'
 #' Non linear least squares (LS) with mode=“LS”. Here the data is first binned
@@ -697,39 +759,20 @@ opt.prolif.model.ls <- function(x, y, starts, upper, lower, fixed, peak.stats, p
 #' In practice I have found very little difference between these two when the
 #' setup is performed correctly.
 #'
-#' @param trace raw FACS intensities
-#' @param peak.0.lower.bound the value on log10 scale where the first valley is
-#' @param peak.thresh.enrich fold change over valley to call peak in initial
-#' estimation (default 1)
-#' @param peak.thresh.summit minimum height of a peak in percentage of total
-#' heights (default 0.05)
-#' @param peak.max the maximum number of peaks to search for (default 12)
-#' @param bins number of bins for fitting (default 250)
-#' @param smoothing.window number of values up and downstream for the NN
-#' smoother (default 2)
-#' @param plot should results be plotted. Overrides plot.optim & plot.final
-#' @param plot.optim should optimization plots be plotted
-#' @param plot.final should final plot of optimized fit be plotted
-#' @param plot.main title for the plot
-#' @param opt.peak.pos.dev limits the range in x where peak positions can be
-#' optimized within. See @details
-#' @param opt.trim.left.tail  Should values that fall outside the initial model
-#' range be removed from optimization. See @details
-#' @param opt.trim.right.tail Should values that fall outside the initial model
-#' range be removed from optimization. See @details
-#' @param mode either LS for least squares or 'MLE' for maximum likelihood
-#' estimation based optimizer. See @details
-#' @param full.out If true output a list with everything needed to easily
-#' re-make plots. Useful if you want to regen plots in ggplot for instance.
-#' @param peak.x.model Should an extra peak be fit that models a trace negative
-#' population of cells. See @details
-#' @param peak.x.upper.bound If peak.x.model=T, specify the hard limit for
-#' finding the mode of peak x. Set to NULL for no limit. (default NULL)
-#' @param peak.x.thresh.summit Controls the automated detection of the mode of
-#' peak x. Only peaks with a % of the total data mode of this are considered.
-#' Should be valued between 0-1. (default 0.05)
-#' @param peak.x.thresh.enrich Similar to peak.thresh.enrich but for peak x.
-#' (default = 1.1)
+#' # `window.scaling.factors`
+#' window.scaling.factors control the size of the window left and right around the next peak position
+#' to find the mode of the next peak. The smaller this value is, the closer to the half intensity the
+#' peak estimates will be.
+#'
+#' I.e. if the estimated distance between peaks is 0.5 and the scaling
+#' factors are c(0.25, 0.5) and the current peak is 1.5 the next peak mode will be estimates as:
+#' lower <- 0.5 * 0.25
+#' upper <- 0.5 * 0.5
+#'
+#' # Where should the next peak be based on half it's intensity
+#' est.peak.pos <- log10(10^1.5/2)
+#'
+#' Then find the max value in the window est.peak.pos-lower, est.peak.pos+upper
 #'
 #' @returns A data frame with peak statistics or list of objects if full.out=T
 #'
@@ -758,7 +801,7 @@ fit.peaks  <- function(trace,
                       plot=T,
                       plot.main = "Proliferation model",
                       opt.peak.pos.dev=NULL,
-                      window.scaling.factors=c(1,1),
+                      window.scaling.factors=c(0.25,0.25),
                       opt.trim.left.tail=F,
                       opt.trim.right.tail=F,
                       mode="LS",

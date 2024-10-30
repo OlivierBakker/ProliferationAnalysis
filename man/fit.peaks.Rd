@@ -14,7 +14,7 @@ fit.peaks(
   plot = T,
   plot.main = "Proliferation model",
   opt.peak.pos.dev = NULL,
-  window.scaling.factors = c(1, 1),
+  window.scaling.factors = c(0.25, 0.25),
   opt.trim.left.tail = F,
   opt.trim.right.tail = F,
   mode = "LS",
@@ -51,6 +51,8 @@ smoother (default 2)}
 \item{opt.peak.pos.dev}{limits the range in x where peak positions can be
 optimized within. See @details}
 
+\item{window.scaling.factors}{Scaling factors for peak finding See details (default c(0.25, 0.25))}
+
 \item{opt.trim.left.tail}{Should values that fall outside the initial model
 range be removed from optimization. See @details}
 
@@ -76,60 +78,65 @@ Should be valued between 0-1. (default 0.05)}
 \item{peak.x.thresh.enrich}{Similar to peak.thresh.enrich but for peak x.
 (default = 1.1)}
 
-\item{peak.thresh.enrich}{fold change over valley to call peak in initial
-estimation (default 1)}
-
-\item{peak.thresh.summit}{minimum height of a peak in percentage of total
-heights (default 0.05)}
-
 \item{peak.max}{the maximum number of peaks to search for (default 12)}
+
+\item{peak.thresh.enrich}{Fold change enrichment of a peak over its valleys}
+
+\item{peak.thresh.summit}{Relative height of a peak with respect to trace mode}
 }
 \value{
 A data frame with peak statistics or list of objects if full.out=T
 }
 \description{
 Fit peaks on a CTV or CFSE or other tracking dye trace using a binned
-or maximum liklihood approach.
-The trace should be raw per event data from the FCS file on the CTV+
-population.
+or maximum likelihood approach. The trace should be raw per event data from
+the FCS file on the CTV+ population.
 }
 \details{
-As a proliferation model, a guassian mixture distribution is fit.
-Initial parameters (number of peaks, peak means, peak summits) are estimated
-using a simple approach where first the generation zero peak is estimated
-based on 'peak.0.lower.bound' on smoothed data. The bins are smoothed using a
-nearest neighbour smoother in the window provided.
+This fits a proliferation model on a trace of raw FACS intensities.
+The fitting happens in two stages:
+1. Initial estimation of number of peaks and their positions
+2. Optimization of the model to find final values
 
-Peaks are only called if they exceed peak.thresh.enrich, the relative
-enrichment between the valley's either side of the peak and the peak summit.
-Peaks must also be adjacent. So if peak 2 does not pass peak.thresh.enrich
+Initial estimation is done based on thresholds. First the 0 peak
+is estimated by finding the mode of the data > peak.0.lower.bound.
+
+The next peak is then found by finding the mode, at half of the intenstiy
+of the mode of peak 0. The range where the mode is looked for can be
+controlled by tweaking `window.scaling.factors`.
+
+Peaks are only called if they exceed `peak.thresh.enrich`, the relative
+enrichment between the valley's either side of the peak and the peak summit
+and `peak.thresh.summit`, the height of the peak with respect to the mode of
+the whole trace. So this takes a value between 0-1 describing a percentage of
+the mode the peak must have. To fit all possible peaks, set both of these to 0
+
+Peaks must also be adjacent. So if peak 2 does not pass `peak.thresh.enrich`
 but peak 3 does, only 2 peaks are fit. This is done to avoid fitting many
 peaks in the marginal count range.
 
-Using the gen0 peak the subsequent peak position is estimated, after which
-the summit is found and the peak mean updated to the local summit. This is
-repeated using each subsequent peak.
-
-After estimating starting values, a gaussian mixture distribution is fit to
-the trace (a sum of the PDF of individuals gaussians). The starting values
+After estimating starting values, a Gaussian mixture distribution is fit to
+the trace (a sum of the PDF of individuals Gaussian). The starting values
 for the peak standard deviations are estimated from the trace in the bound
 of peak0. These values are input into the Levenberg-Marquardt algo to
-optimise with respect to the resdiual sum of squares between the model
-and the smoothed trace.
+optimize with respect to the residual sum of squares between the model
+and the smoothed trace in mode 'LS' or using MLE and R optim() when in mode
+'MLE'.
 
-# opt.peak.pos.dev
+# `opt.peak.pos.dev`
 opt.peak.pos.dev controls the range peaks are allowed to vary in position
 during optimization. Defaults to +- half the estimated peak distance (NULL).
 To ignore this, set to Inf. This setting avoids the optimizer putting peaks
-in the left tail that sometimes might be present or seperating peaks into
-nonsensical distances.
+in the left tail that sometimes might be present or separating peaks into
+nonsensical distances. To contol the allowable range of initial peak
+estimates see `window.scaling.factors`
 
-# opt.trim.left.tail / opt.trim.right.tail
+# `opt.trim.left.tail` / `opt.trim.right.tail`
 Removes values (MLE) or sets count to zero (LS) of values that fall outside
 1sd of the initial model space. This essentially functions as an auto gate
 after identifying initial peak positions.
 
-# mode
+# `mode`
 The package offers two optimization schemes:
 
 Non linear least squares (LS) with mode=“LS”. Here the data is first binned
@@ -145,6 +152,21 @@ but optimization is not.
 
 In practice I have found very little difference between these two when the
 setup is performed correctly.
+
+# `window.scaling.factors`
+window.scaling.factors control the size of the window left and right around the next peak position
+to find the mode of the next peak. The smaller this value is, the closer to the half intensity the
+peak estimates will be.
+
+I.e. if the estimated distance between peaks is 0.5 and the scaling
+factors are c(0.25, 0.5) and the current peak is 1.5 the next peak mode will be estimates as:
+lower <- 0.5 * 0.25
+upper <- 0.5 * 0.5
+
+# Where should the next peak be based on half it's intensity
+est.peak.pos <- log10(10^1.5/2)
+
+Then find the max value in the window est.peak.pos-lower, est.peak.pos+upper
 }
 \examples{
 
